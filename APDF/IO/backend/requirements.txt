@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+pymongo
+pandas
+xlsxwriter
+openpyxl
+python-multipart
+fastapi[all]
