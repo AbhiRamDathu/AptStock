@@ -1,7 +1,8 @@
 import React, { useState, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { AuthContext } from '../context/authContext.jsx';
+import { AuthProvider, useAuth } from '../context/authContext.jsx';
 import '../styles/auth.css';
+import LoadingSpinner from '../components/loadingSpinner.jsx';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -11,8 +12,9 @@ const Login = () => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const { login, error } = useContext(AuthContext);
+  const { login, error } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -40,6 +42,11 @@ const Login = () => {
     setLoading(false);
   };
 
+  const togglePasswordVisibility = () => {
+  setShowPassword(!showPassword);
+};
+
+
   return (
     <div style={styles.container}>
       <div style={styles.card}>
@@ -65,8 +72,9 @@ const Login = () => {
 
           <div style={styles.formGroup}>
             <label style={styles.label}>Password</label>
+            <div style={styles.passwordField}>
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               name="password"
               value={formData.password}
               onChange={handleChange}
@@ -74,6 +82,15 @@ const Login = () => {
               placeholder="Enter your password"
               style={styles.input}
             />
+            <button
+              type="button"
+              style={styles.passwordToggle}
+              onClick={togglePasswordVisibility}
+              title={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? '🙈' : '👁️'}
+            </button>
+          </div>
           </div>
 
           <div style={styles.optionsRow}>
@@ -94,16 +111,25 @@ const Login = () => {
           </div>
 
           <button
-            type="submit"
-            disabled={loading}
-            style={{
-              ...styles.button,
-              opacity: loading ? 0.6 : 1,
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {loading ? '⏳ Logging in...' : '🚀 Login'}
-          </button>
+  type="submit"
+  disabled={loading}
+  style={{
+    ...styles.button,
+    opacity: loading ? 0.8 : 1,
+    cursor: loading ? 'not-allowed' : 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    color: '#ffffff',
+  }}
+>
+  {loading ? (
+    <LoadingSpinner size="sm" text="Logging in..." theme="primary" />
+  ) : (
+    '🚀 Login'
+  )}
+</button>
         </form>
 
         <p style={styles.footerText}>
@@ -170,7 +196,7 @@ const styles = {
     color: '#374151',
   },
   input: {
-    padding: '12px 16px',
+    padding: '12px 140px',
     borderRadius: '8px',
     border: '1px solid #d1d5db',
     fontSize: '14px',
@@ -178,6 +204,23 @@ const styles = {
     transition: 'all 0.2s',
     outline: 'none',
   },
+  passwordField: {
+  position: 'relative',
+  display: 'flex',
+  alignItems: 'center',
+},
+passwordToggle: {
+  position: 'absolute',
+  right: '12px',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '18px',
+  padding: '8px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
   optionsRow: {
     display: 'flex',
     justifyContent: 'space-between',

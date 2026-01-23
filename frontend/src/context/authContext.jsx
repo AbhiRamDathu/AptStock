@@ -1,6 +1,10 @@
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
+import { authAPI } from '../services/api';
+import { use } from 'react';
 
-export const AuthContext = createContext();
+
+const AuthContext = createContext(null);
+
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -9,43 +13,105 @@ export const AuthProvider = ({ children }) => {
   const [accessToken, setAccessToken] = useState(localStorage.getItem('access_token'));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem('refresh_token'));
 
+
   const API_BASE_URL = 'http://localhost:8001';
 
-  // Check authentication status on app mount
+
+  // Check if user is logged in on mount
   useEffect(() => {
     const checkAuth = async () => {
-      if (accessToken) {
+      const token = localStorage.getItem('token');
+      if (token) {
         try {
-          const response = await fetch(`${API_BASE_URL}/auth/me`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-
-          if (response.ok) {
-            const userData = await response.json();
-            setUser(userData);
-          } else if (refreshToken) {
-            // Try to refresh token
-            await handleRefreshToken();
-          } else {
-            // Clear invalid tokens
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            setAccessToken(null);
-          }
+          const userData = await authAPI.getCurrentUser();
+          setUser(userData.user);
         } catch (err) {
           console.error('Auth check failed:', err);
+          localStorage.removeItem('token');
+          setUser(null);
         }
       }
       setLoading(false);
     };
 
+
     checkAuth();
   }, []);
 
-  const handleRefreshToken = useCallback(async () => {
+
+   const login = async (email, password, stayLoggedIn = false) => {
+    try {
+      setError(null);
+      const response = await authAPI.login(email, password, stayLoggedIn);
+
+      if (response.success) {
+        // ✅ Store access_token
+        localStorage.setItem('token', response.access_token);
+        localStorage.setItem('access_token', response.access_token);
+        
+        // ✅ Store refresh_token only if "Stay logged in" is checked
+        if (stayLoggedIn && response.refresh_token) {
+          localStorage.setItem('refresh_token', response.refresh_token);
+          setRefreshToken(response.refresh_token);
+          console.log('✅ Refresh token stored (7-day login enabled)');
+        }
+        
+        // ✅ Set access token in state
+        setAccessToken(response.access_token);
+        
+        // ✅ Set user in state
+        setUser(response.user);
+        
+        return { success: true };
+      } else {
+        setError(response.error || 'Login failed');
+        return { success: false, error: response.error };
+      }
+    } catch (err) {
+      const errorMsg = err.message || 'Login failed';
+      setError(errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
+
+
+  const logout = async () => {
+  try {
+    // ✅ NEW: Call backend to revoke tokens
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (err) {
+        console.warn('Backend logout failed:', err);
+        // Continue with client-side logout anyway
+      }
+    }
+    
+    // ✅ Clear all tokens and state
+    localStorage.removeItem('token');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setUser(null);
+    setAccessToken(null);
+    setRefreshToken(null);
+    setError(null);
+  } catch (err) {
+    console.error('Logout error:', err);
+  }
+};
+
+
+
+    const handleRefreshToken = useCallback(async () => {
     if (!refreshToken) return false;
+
 
     try {
       const response = await fetch(`${API_BASE_URL}/auth/refresh-token?refresh_token=${refreshToken}`, {
@@ -54,6 +120,7 @@ export const AuthProvider = ({ children }) => {
           'Content-Type': 'application/json',
         },
       });
+
 
       if (response.ok) {
         const data = await response.json();
@@ -70,7 +137,15 @@ export const AuthProvider = ({ children }) => {
       logout();
       return false;
     }
-  }, [refreshToken]);
+  }, [refreshToken, logout]);
+
+  // Auto-refresh 1 min before expiry
+useEffect(() => {
+  if (!accessToken) return;
+  const timer = setTimeout(() => handleRefreshToken(), 14 * 60 * 1000);
+  return () => clearTimeout(timer);
+}, [accessToken, handleRefreshToken]);
+
 
   const register = async (email, password, fullName, companyName) => {
     setError(null);
@@ -86,12 +161,15 @@ export const AuthProvider = ({ children }) => {
         }),
       });
 
+
       const data = await response.json();
+
 
       if (!response.ok) {
         setError(data.detail || 'Registration failed');
         return false;
       }
+
 
       return true;
     } catch (err) {
@@ -100,51 +178,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (email, password, stayLoggedIn = false) => {
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          stay_logged_in: stayLoggedIn,
-        }),
-      });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.detail || 'Login failed');
-        return false;
-      }
-
-      setAccessToken(data.access_token);
-      localStorage.setItem('access_token', data.access_token);
-
-      if (data.refresh_token) {
-        setRefreshToken(data.refresh_token);
-        localStorage.setItem('refresh_token', data.refresh_token);
-      }
-
-      setUser(data.user);
-      return true;
-    } catch (err) {
-      setError('Login error: ' + err.message);
-      return false;
-    }
-  };
-
-  const logout = () => {
-    setUser(null);
-    setAccessToken(null);
-    setRefreshToken(null);
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-  };
-
-  const requestPasswordReset = async (email) => {
+    const requestPasswordReset = async (email) => {
     setError(null);
     try {
       const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
@@ -153,12 +188,14 @@ export const AuthProvider = ({ children }) => {
         body: JSON.stringify({ email }),
       });
 
+
       return response.ok;
     } catch (err) {
       setError('Request error: ' + err.message);
       return false;
     }
   };
+
 
   const resetPassword = async (token, newPassword) => {
     setError(null);
@@ -172,12 +209,15 @@ export const AuthProvider = ({ children }) => {
         }),
       });
 
+
       const data = await response.json();
+
 
       if (!response.ok) {
         setError(data.detail || 'Password reset failed');
         return false;
       }
+
 
       return true;
     } catch (err) {
@@ -186,23 +226,26 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        error,
+    <AuthContext.Provider value={{ user, loading, error, login, logout,
         accessToken,
         isAuthenticated: !!user,
         register,
-        login,
-        logout,
         requestPasswordReset,
         resetPassword,
-        refreshToken: handleRefreshToken,
-      }}
-    >
+        refreshToken: handleRefreshToken, }}>
       {children}
     </AuthContext.Provider>
   );
+};
+
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
 };

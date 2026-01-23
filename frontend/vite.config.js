@@ -7,10 +7,15 @@ export default defineConfig({
   plugins: [tailwindcss(),react()],
   server: {
     proxy: {
-      '/upload-and-process': 'http://localhost:8001',
-      '/generate_forecasts_with_real_data': 'http://localhost:8001',
+      '/api/forecast': 'http://localhost:8001',
+      '/forecasts': 'http://localhost:8001',
       '/historical': 'http://localhost:8001',
-      '/skus': 'http://localhost:8001'
+      '/skus': 'http://localhost:8001',
+      '/auth': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        secure: false,
+    },
     }
   },
   build: {

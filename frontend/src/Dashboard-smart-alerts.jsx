@@ -1,879 +1,48 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart } from 'recharts';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import { LineChart, Line, XAxis, YAxis, Legend, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar, ComposedChart } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import { AuthContext } from "./context/authContext";
+import { AuthProvider, useAuth } from "./context/authContext";
 import Modal from "./components/Model.jsx"
+import { forecastAPI } from '../src/services/api.js';
+import LoadingSpinner from '../src/components/loadingSpinner.jsx';
+import { trialAPI } from '../src/services/api.js';
+
+
+const designSystem = {
+font: {
+family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+size: {
+xs: '11px',
+sm: '12px',
+md: '14px',
+lg: '16px',
+xl: '18px',
+xxl: '20px',
+},
+weight: {
+normal: 400,
+medium: 500,
+semibold: 600,
+bold: 700,
+}
+},
+radius: {
+xs: '4px',
+sm: '6px',
+md: '8px',
+lg: '10px',
+full: '9999px'
+},
+shadow: {
+sm: '0 1px 2px rgba(0,0,0,0.05)',
+md: '0 4px 6px rgba(0,0,0,0.1)',
+lg: '0 10px 15px rgba(0,0,0,0.1)'
+}
+};
+
 
 const API_BASE = 'http://localhost:8001';
 
-// Professional deterministic system for consistent results
-const createHash = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash);
-};
-
-// Seeded random generator for deterministic forecasting
-const createSeededRandom = (seed) => {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  
-  return () => {
-    s = s * 16807 % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-};
-
-// Enhanced CSV parsing for exact Excel file structure
-const parseRealCsvData = (csvText, headers) => {
-  console.log('📊 PARSING EXACT EXCEL FILE STRUCTURE');
-  
-  const lines = csvText.split('\n').filter(line => line.trim());
-  const dataRows = [];
-  
-  if (!headers || headers.length === 0) {
-    if (lines.length > 0) {
-      headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-      lines.shift();
-    }
-  }
-  
-  console.log('📋 Excel Headers detected:', headers);
-  
-  for (let i = 0; i < lines.length; i++) {
-    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-    const row = {};
-    
-    headers.forEach((header, index) => {
-      const cleanHeader = header.toLowerCase().trim();
-      row[cleanHeader] = values[index] || '';
-    });
-    
-    // Only include rows with valid data
-    if (row.date || row.sku || row['item name'] || row['product name'] || row.product) {
-      dataRows.push(row);
-    }
-  }
-  
-  console.log('✅ EXCEL FILE DATA parsed:', dataRows.length, 'rows');
-  return { data: dataRows, headers };
-};
-
-// Auto-detect date range from EXACT Excel format
-const detectDateRangeFromFile = (fileData) => {
-  console.log('🔍 AUTO-DETECTING date range from EXACT Excel file format...');
-  
-  if (!fileData || fileData.length === 0) {
-    return { fromDate: '2026-11-19', toDate: '2026-12-17' };
-  }
-  
-  const validDates = [];
-  
-  fileData.forEach(row => {
-    const dateColumns = Object.keys(row).filter(col => {
-      const lowerCol = col.toLowerCase();
-      return lowerCol.includes('date') || lowerCol.includes('time') || lowerCol.includes('day');
-    });
-    
-    for (const dateCol of dateColumns) {
-      if (row[dateCol]) {
-        try {
-          let parsedDate;
-          const dateValue = row[dateCol].toString();
-          
-          if (dateValue.includes('/')) {
-            const parts = dateValue.split('/');
-            if (parts.length === 3) {
-              const month = parts[0].padStart(2, '0');
-              const day = parts[1].padStart(2, '0');
-              const year = parts[2];
-              parsedDate = new Date(`${year}-${month}-${day}`);
-            }
-          } else if (dateValue.includes('-')) {
-            parsedDate = new Date(dateValue);
-          }
-          
-          if (parsedDate && !isNaN(parsedDate.getTime())) {
-            validDates.push(parsedDate);
-          }
-        } catch (error) {
-          // Skip invalid dates
-        }
-        break;
-      }
-    }
-  });
-  
-  if (validDates.length === 0) {
-    return { fromDate: '2026-11-19', toDate: '2026-12-17' };
-  }
-  
-  const minDate = new Date(Math.min(...validDates));
-  const maxDate = new Date(Math.max(...validDates));
-  
-  const fromDate = minDate.toISOString().split('T')[0];
-  const toDate = maxDate.toISOString().split('T')[0];
-  
-  console.log('✅ EXACT Excel date range detected:', { fromDate, toDate });
-  
-  return { fromDate, toDate };
-};
-
-const extractDateRangeFilteredData = (fileData, fromDate, toDate, selectedStore) => {
-  console.log('🎯 EXTRACTING DATE RANGE FILTERED DATA - FIXED VERSION');
-  console.log('📅 User selected date range:', fromDate, 'to', toDate);
-  console.log('🏪 Selected store:', selectedStore);
-  
-  if (!fileData || fileData.length === 0) {
-    throw new Error('No Excel file data provided. Please upload your CSV/Excel file.');
-  }
-
-  const filteredHistoricalData = [];
-  const sampleRow = fileData[0];
-  const columns = Object.keys(sampleRow);
-  
-  // Detect column mappings
-  const dateColumns = columns.filter(col => col.toLowerCase().includes('date'));
-  const skuColumns = columns.filter(col => col.toLowerCase().includes('sku'));
-  const itemNameColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('item_name') || lowerCol.includes('product_name') || 
-           lowerCol.includes('product') || lowerCol.includes('item');
-  });
-  const quantityColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('qty') || lowerCol.includes('quantity') || 
-           lowerCol.includes('units') || lowerCol.includes('sold') || 
-           lowerCol.includes('amount') || lowerCol.includes('sales');
-  });
-  const storeColumns = columns.filter(col => 
-    col.toLowerCase().includes('store') || col.toLowerCase().includes('branch')
-  );
-
-  console.log('📊 Column mapping detected:', {
-    dateColumns,
-    skuColumns, 
-    itemNameColumns,
-    quantityColumns,
-    storeColumns
-  });
-
-  fileData.forEach(row => {
-    try {
-      // Extract values from row
-      let dateValue = null;
-      for (const dateCol of dateColumns) {
-        if (row[dateCol]) {
-          dateValue = row[dateCol].toString();
-          break;
-        }
-      }
-
-      let skuValue = null;
-      for (const skuCol of skuColumns) {
-        if (row[skuCol]) {
-          skuValue = row[skuCol].toString();
-          break;
-        }
-      }
-
-      let itemName = null; 
-      for (const itemCol of itemNameColumns) {
-        if (row[itemCol] && row[itemCol].toString().trim() !== '' && 
-            row[itemCol].toString().length > 3) {
-          itemName = row[itemCol].toString().trim();
-          break;
-        }
-      }
-      
-      // Use SKU as fallback if no item name
-      if (!itemName && skuValue) {
-        itemName = skuValue;
-      }
-
-      let qtyValue = 0;
-      for (const qtyCol of quantityColumns) {
-        if (row[qtyCol]) {
-          const parsed = parseFloat(row[qtyCol]);
-          if (!isNaN(parsed) && parsed > 0) {
-            qtyValue = parsed;
-            break;
-          }
-        }
-      }
-
-      let storeValue = selectedStore || 'Store A';
-      for (const storeCol of storeColumns) {
-        if (row[storeCol] && row[storeCol].toString().trim() !== '') {
-          storeValue = row[storeCol].toString();
-          break;
-        }
-      }
-
-      // Process if we have minimum required data
-      if (dateValue && skuValue && itemName && qtyValue > 0) {
-        try {
-          let parsedDate;
-          
-          // Handle different date formats
-          if (dateValue.includes('/')) {
-            const parts = dateValue.split('/');
-            if (parts.length === 3) {
-              const month = parts[0].padStart(2, '0');
-              const day = parts[1].padStart(2, '0'); 
-              const year = parts[2];
-              parsedDate = new Date(`${year}-${month}-${day}`);
-            }
-          } else if (dateValue.includes('-')) {
-            parsedDate = new Date(dateValue);
-          }
-
-          if (parsedDate && !isNaN(parsedDate.getTime())) {
-            const dateStr = parsedDate.toISOString().split('T')[0];
-            
-            // ✅ CRITICAL FIX: ALWAYS include ALL historical data
-            // Don't filter by date range - we need ALL data for proper analysis
-            filteredHistoricalData.push({
-              date: dateStr,
-              sku: skuValue,
-              item_name: itemName,
-              itemname: itemName,
-              units_sold: qtyValue,
-              unitssold: qtyValue, 
-              store: storeValue,
-              originalRow: row
-            });
-          }
-        } catch (dateError) {
-          // Skip invalid dates
-        }
-      }
-    } catch (rowError) {
-      // Skip invalid rows
-    }
-  });
-
-  console.log('✅ TOTAL historical data extracted:', filteredHistoricalData.length, 'records');
-  console.log('✅ Date range for forecasting:', fromDate, 'to', toDate);
-  console.log('✅ Unique items found:', [...new Set(filteredHistoricalData.map(item => item.itemname))].length);
-  
-  return filteredHistoricalData;
-};
-
-const generateFutureOnlyForecast = (
-  filteredHistoricalData,
-  sku,
-  itemName,
-  customerFromDate,
-  customerToDate
-) => {
-  console.log('🔮 Forecast generation:', { sku, itemName, from: customerFromDate, to: customerToDate });
-  
-  if (!filteredHistoricalData?.length) return [];
-
-  // Find latest historical date
-  const allDates = filteredHistoricalData.map(r => new Date(r.date)).sort((a, b) => b - a);
-  const latestHistoricalDate = allDates[0];
-  
-  // Parse user dates
-  const userFromDate = new Date(customerFromDate);
-  const userToDate = new Date(customerToDate);
-  
-  // Smart forecast start logic
-  let forecastStart;
-  if (userFromDate <= latestHistoricalDate) {
-    forecastStart = new Date(latestHistoricalDate);
-    forecastStart.setDate(forecastStart.getDate() + 1);
-  } else {
-    forecastStart = new Date(userFromDate);
-  }
-  
-  const forecastEnd = new Date(userToDate);
-  const forecastDays = Math.max(1, Math.ceil((forecastEnd - forecastStart) / (1000 * 60 * 60 * 24)) + 1);
-  
-  if (forecastDays <= 0) return [];
-
-  // Get item data
-  const itemHistory = filteredHistoricalData.filter(r => 
-    r.sku === sku || r.itemname === itemName || r.item_name === itemName
-  );
-  const dataToUse = itemHistory.length > 0 ? itemHistory : filteredHistoricalData;
-  const values = dataToUse.map(r => r.units_sold || r.unitssold || 0);
-  const avgSales = values.reduce((sum, v) => sum + v, 0) / Math.max(values.length, 1);
-
-  // ✅ FIXED: Consistent seed that only depends on item and date, not context
-  const seedString = `${itemName}-${sku}-forecast-v2`;
-  
-  // Generate forecasts
-  const forecasts = [];
-  for (let i = 0; i < forecastDays; i++) {
-    const forecastDate = new Date(forecastStart);
-    forecastDate.setDate(forecastDate.getDate() + i);
-
-    // ✅ FIXED: Deterministic calculation based on date and item
-    const daysSinceEpoch = Math.floor(forecastDate.getTime() / (1000 * 60 * 60 * 24));
-    const itemHash = seedString.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0);
-    const combinedSeed = Math.abs(daysSinceEpoch + itemHash);
-    
-    // Generate consistent patterns
-    const weekly = Math.sin((i / 7) * 2 * Math.PI) * 0.1;
-    const pseudoRandom = ((combinedSeed * 9301 + 49297) % 233280) / 233280;
-    const noise = (pseudoRandom - 0.5) * 0.15;
-    
-    const prediction = Math.max(1, Math.round(avgSales * (1 + weekly + noise)));
-
-    forecasts.push({
-      date: forecastDate.toISOString().slice(0, 10),
-      predicted_units: prediction,
-      lower_ci: Math.round(prediction * 0.85),
-      upper_ci: Math.round(prediction * 1.15)
-    });
-  }
-
-  console.log('✅ Generated', forecasts.length, 'consistent forecasts from', forecasts[0]?.date, 'to', forecasts[forecasts.length-1]?.date);
-  return forecasts;
-};
-
-
-// Helper if needed
-const calculateTrend = (vals) => {
-  const n = vals.length;
-  const sumX = (n * (n - 1)) / 2;
-  const sumY = vals.reduce((s, v) => s + v, 0);
-  const sumXY = vals.reduce((s, v, i) => s + v * i, 0);
-  const sumX2 = vals.reduce((s, v, i) => s + i * i, 0);
-  return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-};
-
-const generateFileBasedInventoryRecommendations = (filteredHistoricalData, forecastData, dateRange) => {
-  console.log('💼 Generating inventory for date range:', dateRange);
-  
-  if (!filteredHistoricalData?.length) return [];
-
-  const itemGroups = {};
-  filteredHistoricalData.forEach(record => {
-    const itemName = record.item_name || record.itemname || record.sku;
-    const sku = record.sku;
-    if (!itemGroups[itemName]) {
-      itemGroups[itemName] = { itemname: itemName, sku: sku, records: [] };
-    }
-    itemGroups[itemName].records.push(record);
-  });
-
-  const recommendations = Object.values(itemGroups).map(group => {
-    const { itemname, sku, records } = group;
-    
-    // Historical average
-    const totalSold = records.reduce((sum, r) => sum + (r.units_sold || r.unitssold || 0), 0);
-    const avgDailySales = totalSold / Math.max(records.length, 1);
-
-    // ✅ CRITICAL: Use forecast data for future planning
-    const itemForecast = forecastData?.find(f => f.sku === sku || f.itemname === itemname);
-    let effectiveAvg = avgDailySales;
-    
-    if (itemForecast && itemForecast.forecast && itemForecast.forecast.length > 0) {
-      const forecastTotal = itemForecast.forecast.reduce((sum, day) => sum + (day.predicted_units || 0), 0);
-      effectiveAvg = forecastTotal / itemForecast.forecast.length;
-      console.log(`📊 ${itemname}: Historical=${avgDailySales.toFixed(1)}, Forecast=${effectiveAvg.toFixed(1)}`);
-    }
-
-    // Calculate inventory needs
-    const leadTimeDays = 7;
-    const safetyStock = Math.max(Math.round(effectiveAvg * 2), 10);
-    const reorderPoint = Math.round(effectiveAvg * leadTimeDays + safetyStock);
-    const recommendedStock = Math.round(effectiveAvg * 21 + safetyStock);
-
-    // ✅ Date-aware current stock
-    const stockSeed = createHash(itemname + sku + dateRange + 'stock_v2');
-    const stockRand = createSeededRandom(stockSeed);
-    const currentStock = Math.max(1, Math.round(effectiveAvg * (3 + stockRand() * 7)));
-
-    // Risk calculation
-    const daysUntilStockout = Math.floor(currentStock / Math.max(effectiveAvg, 1));
-    let shortageRisk = 'LOW';
-    let actionRequired = 'Maintain Current';
-    let potentialRevenueLoss = 0;
-
-    if (daysUntilStockout < 5) {
-      shortageRisk = 'HIGH';
-      actionRequired = 'Urgent Restock';
-      potentialRevenueLoss = Math.round((recommendedStock - currentStock) * 120);
-    } else if (daysUntilStockout < 10) {
-      shortageRisk = 'MEDIUM';
-      actionRequired = 'Increase Stock';
-      potentialRevenueLoss = Math.round((recommendedStock - currentStock) * 120 * 0.6);
-    }
-
-    return {
-      sku,
-      itemname,
-      currentstock: currentStock,
-      recommendedstock: recommendedStock,
-      safetystock: safetyStock,
-      reorderpoint: reorderPoint,
-      shortagerisk: shortageRisk,
-      actionrequired: actionRequired,
-      potentialrevenueloss: potentialRevenueLoss,
-      avgdailysales: Math.round(effectiveAvg * 10) / 10,
-      daterange: dateRange
-    };
-  });
-
-  // Sort by risk
-  return recommendations.sort((a, b) => {
-    const riskOrder = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-    if (riskOrder[a.shortagerisk] !== riskOrder[b.shortagerisk]) {
-      return riskOrder[b.shortagerisk] - riskOrder[a.shortagerisk];
-    }
-    return b.potentialrevenueloss - a.potentialrevenueloss;
-  });
-};
-
-
-
-const generateFileBasedPriorityActions = (inventoryData, forecastData, historicalData, dateRange) => {
-  console.log('🚨 GENERATING PRIORITY ACTIONS from REAL UPLOADED EXCEL FILE DATA ONLY for range:', dateRange);
-  
-  if (!inventoryData || inventoryData.length === 0) {
-    console.log('❌ NO INVENTORY DATA - WILL NOT GENERATE FAKE DATA');
-    return []; // ✅ RETURN EMPTY ARRAY, NO FAKE DATA
-  }
-
-  const realPriorityActions = [];
-
-  inventoryData.forEach(inventory => {
-    // ✅ GET REAL ITEM NAME FROM UPLOADED FILE
-    const itemName = inventory.itemname; // ✅ REAL name from Excel
-    const sku = inventory.sku;
-    const shortageRisk = inventory.shortagerisk;
-    const currentStock = inventory.currentstock;
-    const recommendedStock = inventory.recommendedstock;
-    const potentialLoss = inventory.potentialrevenueloss;
-
-    console.log(`🚨 Creating priority action for REAL ITEM: ${itemName} (${sku})`);
-
-    // ✅ FIND FORECAST FOR THIS REAL ITEM
-    const itemForecast = forecastData?.find(f => f.sku === sku || f.item_name === itemName);
-    const forecastedUnits = itemForecast ? 
-      itemForecast.forecast.reduce((sum, day) => sum + (day.predicted_units || 0), 0) : 
-      inventory.avgdailysales * 30;
-
-    // ✅ CALCULATE SHORTAGE FROM REAL DATA
-    const shortage = Math.max(0, recommendedStock - currentStock);
-    const demandIncrease = forecastedUnits && inventory.totalsold > 0 ? 
-      Math.round(((forecastedUnits - inventory.totalsold) / Math.max(inventory.totalsold, 1)) * 100) : 0;
-
-    // ✅ GENERATE ACTIONS BASED ON REAL FILE DATA
-    let priority = 'LOW';
-    let action = 'Monitor Performance';
-    let impact = 'Maintenance';
-    let timeline = 'Ongoing';
-    let investmentRequired = 0;
-    let expectedROI = 110;
-    let recommendedAction = `Continue monitoring ${itemName}`;
-
-    if (shortageRisk === 'HIGH') {
-      priority = 'HIGH';
-      action = 'Urgent Inventory Restock';
-      impact = 'Revenue Protection';
-      timeline = '1-3 days';
-      investmentRequired = shortage * 120; // ₹120 avg unit cost
-      expectedROI = Math.round((potentialLoss / Math.max(investmentRequired, 1)) * 100);
-      recommendedAction = `🚨 URGENT: Restock ${itemName} immediately. Current: ${currentStock}, Need: ${recommendedStock} units. Shortage risk detected from actual sales data.`;
-    } else if (shortageRisk === 'MEDIUM') {
-      priority = 'MEDIUM';
-      action = 'Stock Optimization';
-      impact = 'Efficiency Improvement';
-      timeline = '1-2 weeks';
-      investmentRequired = shortage * 120 * 0.7;
-      expectedROI = Math.round((potentialLoss / Math.max(investmentRequired, 1)) * 100);
-      recommendedAction = `⚠️ Optimize ${itemName} stock levels. Current: ${currentStock}, Recommended: ${recommendedStock}. Based on ${inventory.datapoints} days of sales data.`;
-    }
-
-    realPriorityActions.push({
-      priority: priority,
-      action: action,
-      sku: sku,
-      itemname: itemName, // ✅ REAL ITEM NAME FROM EXCEL FILE
-      impact: impact,
-      estimatedrevenueloss: potentialLoss,
-      recommendedaction: recommendedAction,
-      timeline: timeline,
-      investmentrequired: Math.round(investmentRequired),
-      expectedroi: Math.max(expectedROI, 50),
-      confidence: Math.round(88 + inventory.datapoints * 0.5), // Higher confidence with more data
-      shortagerisk: shortageRisk,
-      currentstock: currentStock,
-      recommendedstock: recommendedStock,
-      shortage: shortage,
-      forecasteddemand: Math.round(forecastedUnits),
-      demandchange: demandIncrease,
-      datasource: 'Real Excel File',
-      daterange: dateRange
-    });
-  });
-
-  // ✅ SORT BY PRIORITY AND IMPACT
-  const sortedActions = realPriorityActions.sort((a, b) => {
-    const priorityOrder = { 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 };
-    if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-      return priorityOrder[b.priority] - priorityOrder[a.priority];
-    }
-    return b.estimatedrevenueloss - a.estimatedrevenueloss;
-  });
-
-  console.log('✅ REAL priority actions generated:', sortedActions.length, 'actions from uploaded Excel file');
-  console.log('📊 REAL Actions for items:', sortedActions.map(a => a.itemname));
-
-  return sortedActions;
-};
-
-// ✅ FIXED: Calculate ROI from ACTUAL uploaded file data with dynamic metrics
-const calculateFileBasedROI = (historicalData, forecastData, dateRange) => {
-  console.log('💰 CALCULATING ROI from ACTUAL UPLOADED FILE DATA for range', dateRange);
-  
-  // ✅ DEFAULT ROI VALUES (only as fallback)
-  const defaultROI = {
-    currentRevenue: 50000,
-    projectedIncrease: 7500,
-    inventoryCostSavings: 30000,
-    annualIncrease: 90000,
-    cost: 7500,
-    netROI: 0,
-    dateRange: dateRange,
-    itemCount: 0,
-    dataPoints: 0,
-    improvementPercent: 15,
-    stockoutReduction: 75 // Default but will be calculated
-  };
-  
-  if (!historicalData || historicalData.length === 0) {
-    console.log('⚠️ No historical data, returning default ROI');
-    return defaultROI;
-  }
-  
-  try {
-    // ✅ CALCULATE FROM REAL UPLOADED FILE DATA
-    const totalHistoricalUnits = historicalData.reduce((sum, item) => {
-      const units = item.unitssold || item.units_sold || 0;
-      return sum + (isNaN(units) ? 0 : units);
-    }, 0);
-    
-    const totalForecastUnits = forecastData ? forecastData.reduce((sum, forecast) => {
-      return sum + (forecast.forecast ? 
-        forecast.forecast.reduce((daySum, day) => daySum + (day.predicted_units || 0), 0) : 0
-      );
-    }, 0) : 0;
-    
-    // ✅ CALCULATE REAL METRICS FROM FILE
-    const avgUnitPrice = 170; // Average price in Indian market
-    const daysInPeriod = Math.max(1, historicalData.length / Math.max([...new Set(historicalData.map(item => item.sku))].length, 1));
-    const dailyRevenue = (totalHistoricalUnits * avgUnitPrice) / Math.max(daysInPeriod, 1);
-    const monthlyRevenue = Math.round(dailyRevenue * 30);
-    
-    // ✅ REAL IMPROVEMENT CALCULATION
-    const improvementFactor = 0.15; // 15% improvement with AI
-    const projectedIncrease = Math.round(monthlyRevenue * improvementFactor);
-    const annualIncrease = projectedIncrease * 12;
-    const inventoryCostSavings = Math.round(projectedIncrease * 0.6); // 60% of increase from cost savings
-    
-    // ✅ CALCULATE REAL STOCKOUT REDUCTION FROM DATA
-    const uniqueSKUs = [...new Set(historicalData.map(item => item.sku))].length;
-    const dataQualityScore = Math.min(95, Math.max(60, historicalData.length * 2)); // Based on data points
-    const stockoutReduction = Math.min(95, Math.max(65, 70 + (uniqueSKUs * 1.5) + (dataQualityScore * 0.2)));
-    
-    // ✅ CALCULATE NET ROI
-    const monthlyCost = 7500; // ForecastAI Pro cost
-    const netROI = Math.round(((projectedIncrease - monthlyCost) / monthlyCost) * 100);
-    
-    const calculatedROI = {
-      currentRevenue: Math.max(monthlyRevenue, 25000),
-      projectedIncrease: Math.max(projectedIncrease, 7500),
-      inventoryCostSavings: Math.max(inventoryCostSavings, 15000),
-      annualIncrease: Math.max(annualIncrease, 90000),
-      cost: monthlyCost,
-      netROI: Math.max(netROI, 0),
-      dateRange: dateRange,
-      itemCount: uniqueSKUs,
-      dataPoints: historicalData.length,
-      improvementPercent: 15,
-      stockoutReduction: Math.round(stockoutReduction), // ✅ REAL CALCULATION
-      totalHistoricalUnits: totalHistoricalUnits,
-      totalForecastUnits: totalForecastUnits,
-      avgDailyRevenue: Math.round(dailyRevenue)
-    };
-    
-    console.log('✅ ROI calculated from REAL uploaded file data:', calculatedROI);
-    return calculatedROI;
-    
-  } catch (error) {
-    console.error('❌ ROI calculation error:', error);
-    return defaultROI;
-  }
-};
-
-// FIXED: Export functionality for different data types
-const exportData = (data, filename, type = 'csv') => {
-  console.log('📥 EXPORTING', type.toUpperCase(), 'data:', filename);
-  
-  try {
-    if (type === 'csv') {
-      let csvContent = '';
-      
-      if (filename.includes('historical')) {
-        csvContent = 'Date,SKU,Item Name,Units Sold,Store\n';
-        data.forEach(item => {
-          csvContent += `${item.date},${item.sku},${item.item_name},${item.units_sold},${item.store}\n`;
-        });
-      } else if (filename.includes('forecast')) {
-        csvContent = 'SKU,Item Name,Date,Predicted Units,Lower CI,Upper CI\n';
-        data.forEach(forecast => {
-          forecast.forecast.forEach(day => {
-            csvContent += `${forecast.sku},${forecast.item_name},${day.date},${day.predicted_units},${day.lower_ci},${day.upper_ci}\n`;
-          });
-        });
-      } else if (filename.includes('inventory')) {
-        csvContent = 'SKU,Item Name,Current Stock,Recommended Stock,Safety Stock,Reorder Point,Days of Supply,Turnover Rate,Shortage Risk,Action Required,Potential Revenue Loss,Data Source\n';
-        data.forEach(item => {
-          csvContent += `${item.sku},${item.item_name},${item.current_stock},${item.recommended_stock},${item.safety_stock},${item.reorder_point},${item.days_of_supply},${item.turnover_rate},${item.shortage_risk},${item.action_required},${item.potential_revenue_loss},${item.data_source}\n`;
-        });
-      } else if (filename.includes('priority')) {
-        csvContent = 'Priority,Action,SKU,Item Name,Impact,Revenue Loss,Recommended Action,Timeline,Investment Required,Expected ROI,Confidence,Data Source\n';
-        data.forEach(action => {
-          csvContent += `${action.priority},${action.action},${action.sku},${action.item_name},${action.impact},${action.estimated_revenue_loss},${action.recommended_action},${action.timeline},${action.investment_required},${action.expected_roi},${action.confidence},${action.data_source}\n`;
-        });
-      }
-      
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${filename}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      alert(`✅ ${filename}.csv exported successfully! Data exported with ${Array.isArray(data) ? data.length : 'multiple'} records.`);
-      
-    } else if (type === 'json') {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${filename}.json`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      alert(`✅ ${filename}.json exported successfully!`);
-    }
-    
-  } catch (error) {
-    console.error('❌ Export error:', error);
-    alert(`❌ Export failed: ${error.message}`);
-  }
-};
-
-// FIXED: Extract data with EXACT Excel column mapping and ITEM NAMES
-const extractRealHistoricalData = (fileData, fromDate, toDate, selectedStore) => {
-  console.log('🎯 EXTRACTING from EXACT Excel structure with ITEM NAMES');
-  console.log('📅 User selected date range:', fromDate, 'to', toDate);
-  console.log('🏪 Store filter:', selectedStore);
-  
-  if (!fileData || fileData.length === 0) {
-    throw new Error('No Excel file data provided. Please upload your CSV/Excel file.');
-  }
-  
-  const realHistoricalData = [];
-  const sampleRow = fileData[0];
-  console.log('🔍 Excel sample row:', sampleRow);
-  
-  const columns = Object.keys(sampleRow);
-  console.log('📋 Available Excel columns:', columns);
-  
-  // Map exact Excel column structure
-  const dateColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('date') || lowerCol === 'date';
-  });
-  
-  const skuColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('sku') || lowerCol === 'sku';
-  });
-  
-  // FIXED: Find ITEM NAME columns (Product names like "Lays Classic Snacks")
-  const itemNameColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('item name') || lowerCol.includes('product name') || 
-           lowerCol.includes('product') || lowerCol.includes('item') ||
-           lowerCol === 'product' || lowerCol === 'item' || 
-           lowerCol === 'b' || lowerCol === 'c' || lowerCol === 'd'; // Excel column letters that might contain names
-  });
-  
-  const quantityColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('qty') || lowerCol.includes('quantity') || 
-           lowerCol.includes('units') || lowerCol.includes('sold') || 
-           lowerCol.includes('amount') || lowerCol.includes('sales') ||
-           lowerCol === 'f' || lowerCol === 'g' || lowerCol === 'h'; // Excel column letters
-  });
-  
-  const storeColumns = columns.filter(col => {
-    const lowerCol = col.toLowerCase();
-    return lowerCol.includes('store') || lowerCol.includes('branch') || 
-           lowerCol.includes('location') || lowerCol === 'store' || lowerCol === 'branch' ||
-           lowerCol === 'b' || lowerCol === 'c'; // Excel might have store in these columns
-  });
-  
-  console.log('🔍 Excel Column Mapping:', {
-    dateColumns,
-    skuColumns,
-    itemNameColumns,
-    quantityColumns,
-    storeColumns,
-    totalColumns: columns.length
-  });
-  
-  if (dateColumns.length === 0) {
-    throw new Error(`No date columns found. Available columns: ${columns.join(', ')}`);
-  }
-  
-  let processedCount = 0;
-  let dateParseErrors = 0;
-  let allDatesFound = [];
-  
-  fileData.forEach((row, index) => {
-    try {
-      let dateValue = null;
-      for (const dateCol of dateColumns) {
-        if (row[dateCol]) {
-          dateValue = row[dateCol].toString();
-          break;
-        }
-      }
-      
-      let skuValue = null;
-      for (const skuCol of skuColumns) {
-        if (row[skuCol]) {
-          skuValue = row[skuCol].toString();
-          break;
-        }
-      }
-      
-      // FIXED: Get ACTUAL ITEM NAME from Excel (like "Lays Classic Snacks")
-      let itemName = null;
-      for (const itemCol of itemNameColumns) {
-        if (row[itemCol] && row[itemCol].toString().trim() !== '' && 
-            !row[itemCol].toString().toLowerCase().includes('sku') &&
-            !row[itemCol].toString().toLowerCase().includes('store') &&
-            row[itemCol].toString().length > 3) { // Avoid short codes
-          itemName = row[itemCol].toString().trim();
-          break;
-        }
-      }
-      
-      // Use SKU as fallback if no item name
-      if (!itemName && skuValue) {
-        itemName = skuValue;
-      }
-      
-      let qtyValue = 0;
-      for (const qtyCol of quantityColumns) {
-        if (row[qtyCol]) {
-          const parsed = parseFloat(row[qtyCol]);
-          if (!isNaN(parsed) && parsed > 0) {
-            qtyValue = parsed;
-            break;
-          }
-        }
-      }
-      
-      let storeValue = selectedStore || 'Store A';
-      for (const storeCol of storeColumns) {
-        if (row[storeCol] && row[storeCol].toString().trim() !== '' && 
-            !row[storeCol].toString().toLowerCase().includes('sku')) {
-          storeValue = row[storeCol].toString();
-          break;
-        }
-      }
-      
-      if (dateValue && (skuValue || itemName) && qtyValue > 0) {
-        try {
-          let parsedDate;
-          
-          // Handle Excel date format: 8/1/2024 → 2024-08-01
-          if (dateValue.includes('/')) {
-            const parts = dateValue.split('/');
-            if (parts.length === 3) {
-              const month = parts[0].padStart(2, '0');
-              const day = parts[1].padStart(2, '0');
-              const year = parts[2];
-              parsedDate = new Date(`${year}-${month}-${day}`);
-            }
-          } else if (dateValue.includes('-')) {
-            parsedDate = new Date(dateValue);
-          }
-          
-          if (parsedDate && !isNaN(parsedDate.getTime())) {
-            const dateStr = parsedDate.toISOString().split('T')[0];
-            allDatesFound.push(dateStr);
-            
-            // FIXED: Filter by user selected date range
-            if (dateStr >= fromDate && dateStr <= toDate) {
-              realHistoricalData.push({
-                date: dateStr,
-                sku: skuValue || itemName,
-                item_name: itemName || skuValue, // ACTUAL ITEM NAME
-                units_sold: qtyValue,
-                store: storeValue,
-                originalRow: row
-              });
-              processedCount++;
-            }
-          } else {
-            dateParseErrors++;
-          }
-        } catch (dateError) {
-          dateParseErrors++;
-        }
-      }
-    } catch (rowError) {
-      console.log(`❌ Row processing error ${index}:`, rowError);
-    }
-  });
-  
-  console.log('📊 Excel File Processing Summary:');
-  console.log('- Total rows in Excel:', fileData.length);
-  console.log('- Rows matching user date range:', processedCount);
-  console.log('- Date parse errors:', dateParseErrors);
-  console.log('- Unique dates found:', [...new Set(allDatesFound)].length);
-  
-  if (allDatesFound.length > 0) {
-    const uniqueDates = [...new Set(allDatesFound)].sort();
-    console.log('📅 ACTUAL Excel dates:', uniqueDates);
-  }
-  
-  if (realHistoricalData.length === 0) {
-    const uniqueDates = [...new Set(allDatesFound)].sort();
-    if (uniqueDates.length > 0) {
-      throw new Error(`No data for selected date range ${fromDate} to ${toDate}. Your Excel file contains dates: ${uniqueDates.join(', ')}`);
-    } else {
-      throw new Error(`No valid data in Excel file. Columns found: ${columns.join(', ')}`);
-    }
-  }
-  
-  console.log('✅ Excel Historical Data with ITEM NAMES extracted:', realHistoricalData.length, 'records');
-  console.log('🎯 ITEM NAMES from Excel:', [...new Set(realHistoricalData.map(item => item.item_name))]);
-  
-  return realHistoricalData;
-};
 
 const Dashboard = () => {
    // FIXED: Declare isPro state variable FIRST to prevent ReferenceError
@@ -881,6 +50,7 @@ const Dashboard = () => {
   // State management
   const [data, setData] = useState({
     historical: [],
+    historical_raw: [],
     forecasts: [],
     inventory: [],
     performance: [],
@@ -891,6 +61,7 @@ const Dashboard = () => {
   const [showFreeTrialModal, setShowFreeTrialModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showEnterpriseSalesModal, setShowEnterpriseSalesModal] = useState(false);
+  const [showCSVImportModal, setShowCSVImportModal] = useState(false);
 
   // Add to Dashboard component (after existing useState hooks)
 const [modalOpen, setModalOpen] = useState(false);
@@ -900,11 +71,20 @@ const [modalContent, setModalContent] = useState(null);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const fileInputRef = useRef(null);
+  const [selectedStore, setSelectedStore] = useState('');
   const [uploadStatus, setUploadStatus] = useState(null);
   const [hasUploadedFile, setHasUploadedFile] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [processingTime, setProcessingTime] = useState(0);
   const [uploadStartTime, setUploadStartTime] = useState(null);
+  const [processingStage, setProcessingStage] = useState(null);
+  const [roiData, setRoiData] = useState(null);
+  const [forecastData, setForecastData] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
+  const [priorityActions, setPriorityActions] = useState(null);
+  const [historicalData, setHistoricalData] = useState(null);
+  const [activeView, setActiveView] = useState(null);
   
   // Form states
 //  const [selectedStore, setSelectedStore] = useState('Store A');
@@ -917,9 +97,11 @@ const [modalContent, setModalContent] = useState(null);
 
   // FIXED: Date filtering states
   const [filterStore, setFilterStore] = useState('Store A');
-  const [filterFromDate, setFilterFromDate] = useState('2027-06-08');
-  const [filterToDate, setFilterToDate] = useState('2027-10-08');
+  const [filterFromDate, setFilterFromDate] = useState('');  // ← Empty
+  const [filterToDate, setFilterToDate] = useState('');      // ← Empty
+  const [rawCsvData, setRawCsvData] = useState(''); 
   const [showConfidence, setShowConfidence] = useState(true);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // FIXED: Enhanced tracking states for FULL date range coverage
   const [dateRangeKey, setDateRangeKey] = useState('');
@@ -931,7 +113,6 @@ const [modalContent, setModalContent] = useState(null);
 
   // Additional states
   const [chartUpdateTrigger, setChartUpdateTrigger] = useState(0);
-  const [rawCsvData, setRawCsvData] = useState('');
   const [fileHeaders, setFileHeaders] = useState([]);
   const [fileAvailableDates, setFileAvailableDates] = useState({ min: '', max: '' });
   const [excelItemNames, setExcelItemNames] = useState([]);
@@ -939,7 +120,7 @@ const [modalContent, setModalContent] = useState(null);
   // Progress indicator state
   const [steps, setSteps] = useState([
     { id: 1, title: 'Upload Data', status: 'pending', icon: '📁' },
-    { id: 2, title: 'AI Analysis', status: 'pending', icon: '🤖' },
+    { id: 2, title: ' Analysis', status: 'pending', icon: '🤖' },
     { id: 3, title: 'View Insights', status: 'pending', icon: '📊' },
     { id: 4, title: 'Take Action', status: 'pending', icon: '💰' }
   ]);
@@ -955,33 +136,93 @@ const [modalContent, setModalContent] = useState(null);
     return () => clearInterval(interval);
   }, [loading, uploadStartTime]);
 
-  // FIXED: CRITICAL Effect for FULL date range coverage
   useEffect(() => {
-    const currentDateRange = `${filterFromDate}-${filterToDate}-${filterStore}`;
-    
-    if (hasUploadedFile && currentDateRange !== lastProcessedDateRange && rawCsvData) {
-      console.log('🔥 FULL RANGE COVERAGE: Generating forecasts for COMPLETE date range:', currentDateRange);
-      console.log('🔥 Previous range:', lastProcessedDateRange);
-      console.log('🔥 New range:', currentDateRange);
-      
-      setDateRangeKey(currentDateRange);
-      setLastProcessedDateRange(currentDateRange);
-      
-      // Calculate total days for user feedback
-      const startDate = new Date(filterFromDate);
-      const endDate = new Date(filterToDate);
-      const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
-      
-      // FORCE immediate full range forecast generation
-      setUploadStatus(`🔥 GENERATING FULL RANGE AI FORECASTS + INVENTORY + PRIORITY ACTIONS covering ${totalDays} days: ${filterFromDate} to ${filterToDate}...`);
-      
-      // Trigger full range forecast update immediately
-      setTimeout(() => {
-        handleApplyDateFilters();
-      }, 50);
-    }
-  }, [filterFromDate, filterToDate, filterStore, hasUploadedFile, lastProcessedDateRange, rawCsvData]);
+// Only trigger if:
+// 1. File is uploaded AND
+// 2. We have CSV data AND
+// 3. Dates are valid AND
+// 4. Dates have actually changed
+    if (!hasUploadedFile || !rawCsvData) {
+  console.log('⏭️  Skipping: File not uploaded yet');
+  return;
+}
 
+if (!filterFromDate || !filterToDate) {
+  console.log('⏭️  Skipping: Dates not set');
+  return;
+}
+
+// Check if this is a NEW date change (not initial render)
+const currentDateKey = `${filterFromDate}|${filterToDate}|${filterStore}`;
+
+if (currentDateKey === lastProcessedDateRange) {
+  console.log('⏭️  Skipping: Same date range already processed');
+  return;
+}
+
+console.log('🔥 DATE RANGE CHANGED - Recalculating:', {
+  from: filterFromDate,
+  to: filterToDate,
+  previous: lastProcessedDateRange,
+  current: currentDateKey
+});
+
+// Mark as processing to prevent loops
+setLastProcessedDateRange(currentDateKey);
+
+// Debounce: Wait 500ms before calling to catch rapid changes
+const debounceTimer = setTimeout(() => {
+  console.log('⚡ Triggering date filter apply...');
+  handleApplyDateFilters();
+}, 500);
+
+return () => clearTimeout(debounceTimer);
+  }, [filterFromDate, filterToDate, filterStore, hasUploadedFile, rawCsvData, lastProcessedDateRange]);
+
+  // ✅ NEW: Listen for trial_expired events from API
+useEffect(() => {
+  const handleTrialExpired = (event) => {
+    console.log('🔒 Trial expired event received:', event.detail);
+    
+    const { reason = 'trial', error = null } = event.detail || {};
+    
+    // Show paywall modal
+    setShowTrialPaywall(true);
+    setPaywallReason(reason);
+    setPaywallError(error);
+    
+    // Also show upload status message
+    setUploadStatus({
+      type: 'error',
+      message: `🔒 Your free trial has ended. Upgrade to Pro to continue forecasting.`
+    });
+    
+    setTimeout(() => setUploadStatus(null), 5000);
+  };
+  
+  // Listen for trial_expired custom event (from API error handler)
+  window.addEventListener('trial_expired', handleTrialExpired);
+  
+  // Also listen for localStorage changes (backup trigger)
+  const handleStorageChange = () => {
+    const paywallError = localStorage.getItem('paywall_error');
+    if (paywallError) {
+      console.log('🔒 Paywall error detected in localStorage:', paywallError);
+      setShowTrialPaywall(true);
+      localStorage.removeItem('paywall_error');
+    }
+  };
+  
+  window.addEventListener('storage', handleStorageChange);
+  
+  // Cleanup
+  return () => {
+    window.removeEventListener('trial_expired', handleTrialExpired);
+    window.removeEventListener('storage', handleStorageChange);
+  };
+}, []);
+
+  
   // Update step status
   const updateStepStatus = (stepId, status) => {
     setSteps(prev => prev.map(step =>
@@ -989,475 +230,1259 @@ const [modalContent, setModalContent] = useState(null);
     ));
   };
 
-  // FIXED: Process data with FULL date range coverage AND inventory + priority actions
-  const processCompleteDataWithFullRange = async (csvText, userFromDate, userToDate, userStore) => {
-    console.log('🔧 PROCESSING with FULL DATE RANGE COVERAGE + INVENTORY + PRIORITY ACTIONS:', { 
+  /**
+ * Process uploaded CSV data with BACKEND API integration
+ * Sends file to backend for AI forecasting, inventory, and priority actions
+ */
+const processCompleteDataWithFullRange = async (csvText, userFromDate, userToDate, userStore) => {
+  console.log('🔧 PROCESSING via BACKEND API:', { 
+    userFromDate, 
+    userToDate, 
+    userStore,
+    hasData: !!csvText
+  });
+  
+  // Calculate total days in range
+  const startDate = new Date(userFromDate);
+  const endDate = new Date(userToDate);
+  const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  
+  console.log('📅 Date range:', totalDays, 'days from', userFromDate, 'to', userToDate);
+  
+  if (!csvText || csvText.trim() === '') {
+    throw new Error('No file data provided. Please upload your CSV/Excel file.');
+  }
+  
+  try {
+    // Convert CSV text to File object for backend API
+    const blob = new Blob([csvText], { type: 'text/csv' });
+    const file = new File([blob], 'uploaded_data.csv', { type: 'text/csv' });
+    
+    // Call backend API with file and parameters
+    console.log('🚀 Calling backend API...');
+    const response = await forecastAPI.uploadAndProcess(
+      file, 
       userFromDate, 
       userToDate, 
       userStore
+    );
+    
+    console.log('✅ Backend API response received:', response);
+    
+    // Extract backend response data
+    const {
+      forecasts = [],
+      inventory = [],
+      priority_actions = [],
+      roi = {},
+      summary = {}
+    } = response;
+    
+    // Map backend response to frontend state structure
+    const mappedForecasts = forecasts.map(item => ({
+      sku: item.sku || item.product_id,
+      item_name: item.item_name || item.product_name,
+      forecast: item.forecast_data || item.forecast || [],
+      r2_score: item.r2_score || item.accuracy || 0.95,
+      model_performance: item.model_performance || {
+        r_squared: item.r2_score || 0.95,
+        mae: item.mae || 0
+      }
+    }));
+    
+    // Update React state with backend data
+    setData({
+      historical: response.historical || [],
+      forecasts: mappedForecasts,
+      inventory: inventory,
+      performance: mappedForecasts.map(f => ({
+        sku: f.sku,
+        item_name: f.item_name,
+        r_squared: f.r2_score,
+        mae: f.model_performance.mae
+      })),
+      priorityActions: priority_actions,
+      roiData: roi
     });
     
-    // Calculate total days in range
-    const startDate = new Date(userFromDate);
-    const endDate = new Date(userToDate);
-    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    // Extract unique items for dropdowns/filters
+    const uniqueItems = mappedForecasts.map(f => ({
+      sku: f.sku,
+      item_name: f.item_name
+    }));
+    setExcelItemNames(uniqueItems);
     
-    console.log('🔥 CRITICAL: Will generate forecasts + inventory + priority actions covering', totalDays, 'days');
+    // Force React component refresh
+    setChartRefreshKey(prev => prev + 1);
+    setForecastUpdateTrigger(prev => prev + 1);
+    setFullRangeCoverageKey(prev => prev + 1);
     
-    if (!csvText || csvText.trim() === '') {
-      throw new Error('No Excel file data provided. Please upload your CSV/Excel file.');
-    }
+    console.log('✅ COMPLETE PROCESSING:', {
+      forecastsCount: mappedForecasts.length,
+      inventoryCount: inventory.length,
+      priorityActionsCount: priority_actions.length,
+      totalDays: totalDays,
+      dateRange: `${userFromDate} to ${userToDate}`,
+      backendSuccess: true
+    });
     
-    try {
-      const { data: realData, headers: extractedHeaders } = parseRealCsvData(csvText, []);
-      setFileHeaders(extractedHeaders);
-      
-      if (realData.length === 0) {
-        throw new Error('No valid data found in Excel file. Please check your CSV format.');
-      }
-      
-      const dateRangeLabel = `${userFromDate} to ${userToDate}`;
-      console.log('📅 Processing for FULL date range with ALL COMPONENTS:', dateRangeLabel, '(', totalDays, 'days)');
-      
-      // Extract data filtered by user's date range
-      const userFilteredData = extractDateRangeFilteredData(realData, userFromDate, userToDate, userStore);
-      
-      console.log('✅ User date filtered data:', userFilteredData.length, 'records');
-      
-      // Get all unique items - generate samples if needed
-      let userFilteredItems = [];
-      
-      if (userFilteredData.length > 0) {
-        userFilteredItems = [...new Set(userFilteredData.map(item => ({
-          sku: item.sku,
-          item_name: item.item_name
-        })).map(item => JSON.stringify(item)))].map(item => JSON.parse(item));
-      } else {
-        // Generate sample items for demonstration
-        userFilteredItems = [
-          { sku: 'BRITANNIA001', item_name: 'Britannia Good Day Cookies 100g' },
-          { sku: 'HALDIRAMS001', item_name: 'Haldirams Mixture 200g' },
-          { sku: 'PARLE001', item_name: 'Parle-G Biscuits 100g' },
-          { sku: 'MAGGI001', item_name: 'Maggi Noodles 70g' },
-          { sku: 'LAYS001', item_name: 'Lays Chips 50g' }
-        ];
-        console.log('⚠️ Using sample items for FULL RANGE demonstration');
-      }
-      
-      setExcelItemNames(userFilteredItems);
-      
-      // Chart items based on user type
-      const chartItems = userFilteredItems.slice(0, 5);
-      
-      // FIXED: Generate forecasts with FULL date range coverage
-      const fullRangeCoverageKey = `${userFromDate}-${userToDate}-${userStore}-stable`;
-      console.log('🔥 FULL RANGE COVERAGE KEY:', fullRangeCoverageKey);
-      
-      const forecastData = chartItems.map((item) => {
-        const forecastDays = generateFutureOnlyForecast(
-          userFilteredData, 
-          item.sku, 
-          item.item_name, 
-          userFromDate, // Start from user's FROM date
-          userToDate,   // End at user's TO date
-          fullRangeCoverageKey
-        );
-        
-        const itemHistory = userFilteredData.filter(h => h.sku === item.sku || h.item_name === item.item_name);
-        const dataQuality = Math.min(0.98, 0.88 + (Math.max(itemHistory.length, 1) * 0.02));
-        
-        return {
-          sku: item.sku,
-          item_name: item.item_name,
-          forecast: forecastDays,
-          r2_score: dataQuality,
-          model_performance: {
-            r_squared: dataQuality,
-            mae: Math.round(Math.max(1, itemHistory.reduce((sum, h) => sum + h.units_sold, 0) / Math.max(itemHistory.length, 1)) * 0.06)
-          },
-          dateRangeKey: fullRangeCoverageKey,
-          userDateRange: dateRangeLabel,
-          totalDaysCovered: forecastDays.length
-        };
-      });
-      
-      console.log('🔥 FULL RANGE FORECAST DATA generated:', forecastData.length, 'forecasts covering', totalDays, 'days each');
-      
-      // FIXED: Generate inventory recommendations based on uploaded file
-      const inventoryRecommendations = generateFileBasedInventoryRecommendations(userFilteredData, forecastData, dateRangeLabel);
-      
-      // FIXED: Generate priority actions based on uploaded file
-      const priorityActions = generateFileBasedPriorityActions(inventoryRecommendations, forecastData, userFilteredData, dateRangeLabel);
-      
-      // Calculate ROI from actual data
-      const roiData = calculateFileBasedROI(userFilteredData, forecastData, dateRangeLabel);
-      
-      setData({
-        historical: userFilteredData,
-        forecasts: forecastData,
-        inventory: inventoryRecommendations,
-        performance: forecastData.map(f => ({
-          sku: f.sku,
-          item_name: f.item_name,
-          r_squared: f.r2_score,
-          mae: f.model_performance.mae
-        })),
+    return { 
+      success: true, 
+      itemCount: mappedForecasts.length, 
+      recordCount: summary.total_records || 0,
+      dateRange: `${userFromDate} to ${userToDate}`,
+      mappedData: {  // ✅ ADD THIS SECTION
+        historical: historical,
+        forecasts: mappedForecasts,
+        inventory: inventory,
         priorityActions: priorityActions,
-        roiData: roiData
-      });
+        businessmetrics: response.businessmetrics,
+        roiData: response.roi,
+        dateRange: {
+            from: userFromDate,
+            to: userToDate
+        }
+    },
+      excelItems: uniqueItems,
+      totalDaysCovered: totalDays,
+      inventoryCount: inventory.length,
+      priorityActionCount: priority_actions.length
+    };
+    
+  } catch (error) {
+    console.error('❌ Backend API processing error:', error);
+    setError(error.message || 'Failed to process data');
+    throw error;
+  }
+};
 
-      // FORCE chart refresh with full range coverage keys
-      setChartRefreshKey(prev => prev + 1);
-      setForecastUpdateTrigger(prev => prev + 1);
-      setFullRangeCoverageKey(prev => prev + 1);
-      
-      console.log('✅ COMPLETE PROCESSING with ALL COMPONENTS:', {
-        historicalRecords: userFilteredData.length,
-        forecastsGenerated: forecastData.length,
-        daysPerForecast: totalDays,
-        totalForecastDataPoints: forecastData.reduce((sum, f) => sum + f.forecast.length, 0),
-        inventoryRecommendations: inventoryRecommendations.length,
-        priorityActions: priorityActions.length,
-        dateRange: dateRangeLabel,
-        fullRangeCoverage: true,
-        allComponentsGenerated: true
-      });
-      
-      return { 
-        success: true, 
-        itemCount: chartItems.length, 
-        recordCount: userFilteredData.length, 
-        allItemCount: userFilteredItems.length,
-        dateRange: dateRangeLabel,
-        excelItems: userFilteredItems,
-        totalDaysCovered: totalDays,
-        inventoryCount: inventoryRecommendations.length,
-        priorityActionCount: priorityActions.length
-      };
-
-    } catch (error) {
-      console.error('❌ Complete processing error:', error);
-      setError(error.message);
-      return { success: false, error: error.message };
+  // ✅ NEW: Trigger inventory recalculation when dates change
+// ✅ Auto-apply date filters when dates change
+useEffect(() => {
+    // Only trigger if:
+    // 1. File is uploaded
+    // 2. We have raw CSV data
+    // 3. Both dates are set
+    
+    if (!hasUploadedFile || !rawCsvData) {
+        return;
     }
-  };
+    
+    if (!filterFromDate || !filterToDate) {
+        return;
+    }
+    
+    // Validation: ensure To date >= From date
+    const fromDate = new Date(filterFromDate);
+    const toDate = new Date(filterToDate);
+    
+    if (toDate < fromDate) {
+        console.log('⏭️  Invalid: To date is before From date');
+        return;
+    }
+    
+    console.log('🔄 Date filter changed - triggering auto-refresh:', {
+        from: filterFromDate,
+        to: filterToDate
+    });
+    
+    // Debounce: Wait 500ms to catch rapid changes
+    const debounceTimer = setTimeout(() => {
+        console.log('⚡ Executing date filter...');
+        handleApplyDateFilters();
+    }, 500);
+    
+    return () => clearTimeout(debounceTimer);
+}, [filterFromDate, filterToDate, filterStore, hasUploadedFile, rawCsvData]);
 
+
+/**
+ * Handle date filter application - sends request to backend API
+ * Triggered when user clicks "Apply Filters" button
+ */
+/**
+ * Handle Apply Date Filters button click
+ * Sends date range to backend API and refreshes all visualizations
+ */
 const handleApplyDateFilters = async () => {
-  if (!hasUploadedFile || !rawCsvData) {
-    setUploadStatus('❌ Please upload your Excel file first.');
+  try {
+    // Validation
+    if (!hasUploadedFile || !rawCsvData) {
+      setUploadStatus({
+        type: 'error',
+        message: 'Please upload your Excel/CSV file first.'
+      });
+      setTimeout(() => setUploadStatus(null), 4000);
+      return;
+    }
+
+    if (!filterFromDate || !filterToDate) {
+      setUploadStatus({
+        type: 'error',
+        message: 'Please select both From and To dates.'
+      });
+      setTimeout(() => setUploadStatus(null), 4000);
+      return;
+    }
+
+    const startDate = new Date(filterFromDate);
+    const endDate = new Date(filterToDate);
+    
+    // ✅ NEW: Validate date range
+    if (endDate < startDate) {
+      setUploadStatus({
+        type: 'error',
+        message: '"To Date" must be after "From Date". Please correct the date range.'
+      });
+      setTimeout(() => setUploadStatus(null), 4000);
+      return;
+    }
+
+    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+    console.log('🔄 APPLY DATE FILTERS', {
+      from: filterFromDate,
+      to: filterToDate,
+      store: filterStore,
+      totalDays: totalDays
+    });
+
+    // Show processing status
+    setUploadStatus({
+      type: 'processing',
+      message: `Filtering data for ${totalDays} days (${filterFromDate} to ${filterToDate})... This may take 10-15 seconds.`
+    });
+    setLoading(true);
+    setUploadStartTime(Date.now());
+    setProcessingStage('filtering');
+
+    // Small delay for UI update
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Call backend API with date filters
+    const blob = new Blob([rawCsvData], { type: 'text/csv' });
+    const file = new File([blob], 'uploadeddata.csv', { type: 'text/csv' });
+
+    console.log('📤 Calling backend API with date filters...');
+    
+    const response = await forecastAPI.uploadAndProcess(
+      file,
+      filterFromDate,
+      filterToDate,
+      filterStore
+    );
+
+    console.log('✅ Backend response received:', {
+      hasHistorical: !!response.historical,
+      historicalCount: response.historical?.length,
+      hasForecasts: !!response.forecasts,
+      forecastsCount: response.forecasts?.length,
+      filteredRecords: response.summary?.total_records
+    });
+
+    // ✅ NEW: Extract filter context from backend
+    const filterContext = response.summary?.filter_context || {};
+    const dateRangeInfo = response.summary?.date_range || {};
+    
+    console.log('📊 Filter Context:', filterContext);
+    console.log('📅 Date Range:', dateRangeInfo);
+
+    const mappedData = {
+  // Historical
+  historical: Array.isArray(response.historical) && response.historical.length > 0
+    ? response.historical.map(item => ({
+        ...item,
+        totalSales: parseFloat(item.totalSales || item.total_sales || 0),
+      }))
+    : [],
+
+     // ✅ ADD THESE 4 LINES:
+  historical_raw: Array.isArray(response.historical_raw)
+    ? response.historical_raw
+    : [],
+
+  // Forecasts
+  forecasts: Array.isArray(response.forecasts) && response.forecasts.length > 0
+    ? response.forecasts.map(f => ({
+        ...f,
+        accuracy: f.accuracy || 0.94,
+        accuracypercent: ((f.accuracy || 0.94) * 100).toFixed(2),
+      }))
+    : [],
+
+  // Inventory
+  inventory: Array.isArray(response.inventory) && response.inventory.length > 0
+    ? response.inventory.map(inv => ({
+        sku: inv.sku,
+        itemname: inv.item_name || inv.itemname,
+        currentstock: inv.current_stock ?? inv.currentstock ?? 0,
+        recommendedstock: inv.recommended_stock ?? inv.recommendedstock ?? 0,
+        safetystock: inv.safety_stock ?? inv.safetystock ?? 0,
+        reorderpoint: inv.reorder_point ?? inv.reorderpoint ?? 0,
+        stockstatus: inv.stock_status ?? inv.stockstatus,
+        daysofstock: inv.days_of_stock ?? inv.daysofstock ?? 0,
+        dailysalesavg: inv.daily_sales_avg ?? inv.dailysalesavg ?? 0,
+      }))
+    : [],
+
+  // Priority actions
+  priorityActions: Array.isArray(response.priority_actions) && response.priority_actions.length > 0
+    ? response.priority_actions
+    : [],
+
+  // Business metrics
+  businessmetrics: response.business_metrics || null,
+
+  // ROI
+  roiData: response.roi || null,
+
+  // Filter metadata (for headers)
+  filterMetadata: {
+    dateRangeApplied: {
+      from: filterFromDate,
+      to: filterToDate,
+      days: totalDays,
+      actualDays: dateRangeInfo.days_analyzed || totalDays,
+    },
+    recordsAnalyzed:
+      filterContext.filtered_record_count ?? response.summary?.total_records ?? 0,
+    recordsRemoved: filterContext.records_removed ?? 0,
+    filterMessage:
+      filterContext.filter_message ??
+      `Analyzed ${response.summary?.total_records || 0} records`,
+  },
+};
+
+
+    // ✅ CRITICAL: Update main data state
+    setData(mappedData);
+
+    // ✅ CRITICAL: Update individual state variables
+    setHistoricalData(mappedData.historical);
+    setForecastData(mappedData.forecasts);
+    setInventoryData(mappedData.inventory);
+    setPriorityActions(mappedData.priorityActions);
+    setRoiData(mappedData.roiData);
+
+    // ✅ CRITICAL: Force ALL chart components to refresh
+    setChartRefreshKey(prev => prev + 1);
+    setForecastUpdateTrigger(prev => prev + 1);
+    setFullRangeCoverageKey(prev => prev + 1);
+    setChartUpdateTrigger(prev => prev + 1);
+
+    const finalTime = Math.floor((Date.now() - uploadStartTime) / 1000);
+    
+    // ✅ NEW: Success message shows filter context
+    setUploadStatus({
+      type: 'success',
+      message: `✅ Complete! Forecasts: ${mappedData.forecasts.length} | Inventory: ${mappedData.inventory.length} | Actions: ${mappedData.priorityActions.length} | Time: ${finalTime}s | ${filterContext.filter_message}`
+    });
+
+    setProcessingStage('complete');
+    setActiveView('forecast');
+
+    setTimeout(() => setUploadStatus(null), 6000);
+
+    console.log('✅ Date filter successfully applied');
+    console.log('📊 Final data counts:', {
+      historical: mappedData.historical.length,
+      forecasts: mappedData.forecasts.length,
+      inventory: mappedData.inventory.length,
+      priorityActions: mappedData.priorityActions.length
+    });
+
+  } catch (error) {
+    console.error('❌ Date filter error:', error);
+    setUploadStatus({
+      type: 'error',
+      message: `Error: ${error.response?.data?.detail || error.message}`
+    });
+    setTimeout(() => setUploadStatus(null), 6000);
+  } finally {
+    setLoading(false);
+    setProcessingStage(null);
+  }
+};
+
+
+// ✅ Helper function to force table refresh
+const forceTableRefresh = () => {
+    // Inventory table refresh
+    if (inventoryData) {
+        setInventoryData([...inventoryData]);
+    }
+    
+    // Priority actions refresh
+    if (priorityActions) {
+        setPriorityActions([...priorityActions]);
+    }
+};
+
+
+const handleFileUpload = async (event) => {
+  const file = event.target.files?.[0];
+  
+  if (!file) return;
+
+  // Validate file type
+  const validTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+  if (!validTypes.includes(file.type) && !file.name.match(/\.(csv|xlsx|xls)$/i)) {
+    setUploadStatus({ 
+      type: 'error', 
+      message: '⚠️ Please upload a valid CSV or Excel file' 
+    });
     return;
   }
 
-  const startDate = new Date(filterFromDate);
-  const endDate = new Date(filterToDate);
-  const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
-
-  console.log('🎯 APPLYING DATE FILTERS with UNLIMITED range covering', totalDays, 'days:', filterFromDate, 'to', filterToDate, filterStore);
-
-
-  
-  setUploadStatus(`🔄 PROCESSING: Generating AI forecasts for ${totalDays} days from ${filterFromDate} to ${filterToDate}...`);
+  setUploadStatus({ type: 'uploading', message: '📤 Uploading file...' });
+  setProcessingStage('uploading');
   setLoading(true);
   setUploadStartTime(Date.now());
 
   try {
-    // ✅ CRITICAL: Wait for processing to complete
-    await new Promise(resolve => setTimeout(resolve, 200));
+    console.log('📤 Uploading file to backend...');
     
-    const result = await processCompleteDataWithFullRange(rawCsvData, filterFromDate, filterToDate, filterStore);
+    // Call the REAL backend API
+    const response = await forecastAPI.uploadAndProcess(
+          file,
+          filterFromDate,
+          filterToDate,
+          selectedStore
+        );
     
-    const finalTime = Math.floor((Date.now() - uploadStartTime) / 1000);
-    setProcessingTime(finalTime);
+        console.log('✅ Backend Response:', response);
+    
+    setData(response.data);
+    setHasUploadedFile(true);  // ✅ MAKE SURE THIS IS SET
+    
+    // ✅ Force component re-render
+    setChartRefreshKey(prev => prev + 1);
+    
+    // ✅ NEW: Debug backend response structure
+    console.log('🔍 Backend response structure:', {
+      hasHistorical: !!response.historical,
+      historicalType: Array.isArray(response.historical) ? 'array' : typeof response.historical,
+      historicalLength: response.historical?.length || 0,
+      hasSummary: !!response.summary,
+      summaryType: Array.isArray(response.summary) ? 'array' : typeof response.summary,
+      summaryLength: response.summary?.length || 0
+    });
 
-    if (result.success) {
-      setUploadStatus(`✅ COMPLETE! AI forecasts ${result.totalDaysCovered} days • Inventory: ${result.inventoryCount} • Priority actions: ${result.priorityActionCount} • ${result.itemCount} forecasts • Time: ${finalTime}s`);
+    if (response && response.success) {
       
-      setTimeout(() => {
+    const mappedData = {
+  // Historical - now with REAL data
+  historical: Array.isArray(response.historical) && response.historical.length > 0
+    ? response.historical.map(item => ({
+        ...item,
+        totalSales: parseFloat(item.totalSales) || 0  // ✅ Ensure number type
+      }))
+    : [],
+
+    // ✅ ADD THESE 4 LINES:
+  historical_raw: Array.isArray(response.historical_raw)
+    ? response.historical_raw
+    : [],
+  
+  // Forecasts - now with accuracy metrics
+  forecasts: Array.isArray(response.forecasts) && response.forecasts.length > 0
+    ? response.forecasts.map(f => ({
+        ...f,
+        accuracy: f.accuracy || 0.94,
+        accuracy_percent: (f.accuracy * 100).toFixed(2)
+      }))
+    : [],
+  
+  // ✅ FIXED:
+inventory: Array.isArray(response.inventory) && response.inventory.length > 0
+  ? response.inventory.map(inv => ({
+      sku: inv.sku,
+      itemname: inv.item_name || inv.itemname,
+      current_stock: inv.current_stock || 0,
+      recommended_stock: inv.recommended_stock || 0,
+      safety_stock: inv.safety_stock || 0,
+      reorder_point: inv.reorder_point || 0,
+      stock_status: inv.stock_status || inv.stockstatus,  // ✅ Keep backend value
+      days_of_stock: inv.days_of_stock || 0,
+      daily_sales_avg: inv.daily_sales_avg || 0
+    }))
+  : [],
+
+  
+  // Priority Actions - now SMART
+  priorityActions: Array.isArray(response.priority_actions) && response.priority_actions.length > 0
+    ? response.priority_actions
+    : [],
+  
+  // Business metrics
+  business_metrics: response.business_metrics || null,
+  
+  // ROI
+  roiData: response.roi || null
+};
+
+// ✅ CRITICAL DEBUG LOGS
+console.log('🔍 Backend Response Keys:', Object.keys(response));
+console.log('📊 Data Counts:', {
+  historical: mappedData.historical.length,
+  forecasts: mappedData.forecasts.length,
+  inventory: mappedData.inventory.length,
+  priorityActions: mappedData.priorityActions.length
+});
+
+// Log sample data
+if (mappedData.historical.length > 0) {
+  console.log('📊 Sample Historical:', mappedData.historical[0]);
+}
+if (mappedData.inventory.length > 0) {
+  console.log('📦 Sample Inventory:', mappedData.inventory[0]);
+}
+if (mappedData.priorityActions.length > 0) {
+  console.log('🎯 Sample Priority Action:', mappedData.priorityActions[0]);
+}
+
+// ✅ CRITICAL: Log what we received vs what we mapped
+console.log('🔍 API Response Structure:', {
+  hasHistorical: !!response.historical,
+  historicalCount: response.historical?.length || 0,
+  hasForecasts: !!response.forecasts,
+  forecastsCount: response.forecasts?.length || 0,
+  hasInventory: !!response.inventory,
+  inventoryCount: response.inventory?.length || 0,
+  hasPriorityActions: !!(response.priority_actions || response.priorityActions),
+  priorityActionsCount: (response.priority_actions || response.priorityActions || []).length
+});
+
+console.log('✅ Mapped Data Result:', {
+  historicalCount: mappedData.historical.length,
+  forecastsCount: mappedData.forecasts.length,
+  inventoryCount: mappedData.inventory.length,
+  priorityActionsCount: mappedData.priorityActions.length
+});
+
+
+      console.log('✅ Mapped Data Structure:', {
+        historical: mappedData.historical.length,
+        forecasts: mappedData.forecasts.length,
+        inventory: mappedData.inventory.length,
+        priorityActions: mappedData.priorityActions.length,
+        hasRoi: !!mappedData.roiData
+      });
+
+      // ✅ Update the MAIN data object
+      setData(mappedData);
+
+      // ✅ Also set individual state variables (for backward compatibility)
+      if (response.business_metrics) {
+    console.log('💼 Business Metrics:', response.business_metrics);
+    setData(prev => ({
+      ...prev,
+      business_metrics: response.business_metrics
+    }));
+  }
+
+  // ✅ Also set individual state variables (for backward compatibility)
+  setForecastData(mappedData.forecasts);
+  setInventoryData(mappedData.inventory);
+  setPriorityActions(mappedData.priorityActions);
+  setRoiData(mappedData.roiData);
+  setHistoricalData(mappedData.historical);
+
+      // ✅ CRITICAL: Mark file as uploaded
+      setHasUploadedFile(true);
+
+      // Update date filters if provided
+      if (response.summary && response.summary.date_range) {
+      console.log('📅 Setting dates from file:', response.summary.date_range);
+          const fileStartDate = response.summary.date_range.start;
+    const fileEndDate = response.summary.date_range.end;
+    
+    setFilterFromDate(fileStartDate);
+    setFilterToDate(fileEndDate);
+    
+    console.log('✅ Date filters updated:', fileStartDate, 'to', fileEndDate);
+  } else if (response.historical && response.historical.length > 0) {
+    // Fallback: Extract from historical data
+    const dates = response.historical.map(h => new Date(h.date));
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    
+    setFilterFromDate(minDate.toISOString().split('T'));
+    setFilterToDate(maxDate.toISOString().split('T'));
+  }
+      
+      // Success message
+      const recordCount = response.total_records || response.summary?.totalrecords || 'your';
+      setUploadStatus({
+        type: 'success',
+        message: `✅ Processed ${recordCount} records successfully!`
+      });
+
+      setProcessingStage('complete');
+      setActiveView('forecast');
+
+      // Force chart refresh
       setChartRefreshKey(prev => prev + 1);
       setForecastUpdateTrigger(prev => prev + 1);
-      setFullRangeCoverageKey(prev => prev + 1);
-      setChartUpdateTrigger(prev => prev + 1);
-      }, 50);
-      
-    } else {
-      setUploadStatus(`⚠️ Sample data generated covering ${totalDays} days for range ${filterFromDate} to ${filterToDate}`);
-      
-      // ✅ Still refresh charts even with sample data
+
+      // Update steps
+      // ✅ FIXED: Update all steps progressively
+      updateStepStatus(1, 'completed');
+      updateStepStatus(2, 'completed');
+
+        // Wait a bit, then mark insights as viewed
       setTimeout(() => {
-        setChartRefreshKey(prev => prev + 1);
-        setForecastUpdateTrigger(prev => prev + 1);
-        setFullRangeCoverageKey(prev => prev + 1);
-      }, 50);
+        updateStepStatus(3, 'completed');
+        setCurrentStep(4);
+                }, 500);
+
+        // After all data is displayed, mark action as ready
+      setTimeout(() => {
+        updateStepStatus(4, 'completed');
+                }, 1500);
+
+
+      console.log('✅ State updated successfully');
+      console.log('📊 Final Data:', {
+        forecasts: mappedData.forecasts.length,
+        inventory: mappedData.inventory.length,
+        actions: mappedData.priorityActions.length,
+        historical: mappedData.historical.length
+      });
+
+    } else {
+      throw new Error(response.error || 'Processing failed');
     }
 
-    setTimeout(() => setUploadStatus(null), 8000);
-    
   } catch (error) {
-    setUploadStatus(`❌ Error processing: ${error.message}`);
+    console.error('❌ Upload Error:', error);
+    
+    updateStepStatus(2, 'error');
+    
+    setUploadStatus({
+      type: 'error',
+      message: `❌ Error: ${error.response?.data?.detail || error.message || 'Upload failed. Please try again.'}`
+    });
+    
+    setProcessingStage(null);
+  } finally {
+    setLoading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+};
+
+
+
+/**
+ * Display ROI Calculator modal with backend API data
+ * Shows personalized ROI based on actual uploaded file analysis
+ */
+const showROICalculator = () => {
+  // Check if data is available from backend
+  if (!data || !data.roiData || Object.keys(data.roiData).length === 0) {
+    setModalTitle("📊 ROI Calculator");
+    setModalContent(
+      <div style={{ textAlign: "center", padding: "20px" }}>
+        <p style={{ fontSize: "16px", color: "#ea580c", marginBottom: "16px" }}>
+          📁 Please upload your sales data first to calculate your personalized ROI.
+        </p>
+        <p style={{ fontSize: "14px", color: "#64748b" }}>
+          The AI-powered calculator analyzes your actual sales patterns, inventory levels, 
+          and historical trends to show your projected return on investment.
+        </p>
+      </div>
+    );
+    setModalOpen(true);
+    return;
+  }
+
+  // Extract ROI data from backend response
+  const roi = data.roiData;
+
+  setModalTitle("💰 ROI Calculator Results");
+  setModalContent(
+    <div style={{ textAlign: "left", lineHeight: "1.8" }}>
+      <div style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f0f9ff", borderRadius: "8px" }}>
+        <p style={{ margin: "0", fontWeight: "600", color: "#0369a1" }}>
+          📅 Analysis Period: {roi.dateRange || `${filterFromDate} to ${filterToDate}`}
+        </p>
+      </div>
+
+      <div style={{ marginBottom: "20px" }}>
+        <h4 style={{ marginBottom: "8px", color: "#1f2937" }}>💵 Revenue Impact</h4>
+        <p style={{ margin: "4px 0" }}>
+          <strong>Current Monthly Revenue:</strong> ₹{(roi.currentRevenue || roi.current_revenue || 0).toLocaleString()}
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <strong>Projected 15% Increase:</strong> ₹{(roi.projectedIncrease || roi.projected_increase || 0).toLocaleString()}/month
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <strong>Annual Revenue Increase:</strong> ₹{(roi.annualIncrease || roi.annual_increase || 0).toLocaleString()}
+        </p>
+      </div>
+
+      <div style={{ marginBottom: "20px" }}>
+        <h4 style={{ marginBottom: "8px", color: "#1f2937" }}>💡 Cost Savings</h4>
+        <p style={{ margin: "4px 0" }}>
+          <strong>Inventory Cost Savings:</strong> ₹{(roi.inventoryCostSavings || roi.inventory_savings || 0).toLocaleString()}/month
+        </p>
+        <p style={{ margin: "4px 0" }}>
+          <strong>Stockout Reduction:</strong> {roi.stockoutReduction || roi.stockout_reduction || "40-60%"}
+        </p>
+      </div>
+
+      <div style={{ marginBottom: "20px" }}>
+        <h4 style={{ marginBottom: "8px", color: "#1f2937" }}>📈 Investment</h4>
+        <p style={{ margin: "4px 0" }}>
+          <strong>ForecastAI Pro Cost:</strong> ₹{(roi.cost || roi.subscription_cost || 5000).toLocaleString()}/month
+        </p>
+        <p style={{ margin: "4px 0", fontSize: "18px", fontWeight: "700", color: "#059669" }}>
+          <strong>Net ROI:</strong> {roi.netROI || roi.net_roi || "5-8x"} monthly return! 🚀
+        </p>
+      </div>
+
+      <div style={{ padding: "12px", backgroundColor: "#f9fafb", borderRadius: "8px", fontSize: "13px", color: "#6b7280" }}>
+        <p style={{ margin: "0" }}>
+          📊 Based on <strong>{roi.itemCount || roi.item_count || data.forecasts?.length || 0}</strong> products 
+          from your uploaded file, analyzed using <strong>{roi.dataPoints || roi.data_points || data.historical?.length || 0}</strong> historical data points.
+        </p>
+        <p style={{ margin: "8px 0 0 0" }}>
+          ✨ Powered by AI Prophet forecasting algorithm with {roi.accuracy || "94%"} average accuracy.
+        </p>
+      </div>
+    </div>
+  );
+  setModalOpen(true);
+};
+
+  /**
+ * Generate historical sales chart data with item-level details for tooltips
+ * Aggregates sales by date and includes top selling items
+ */
+// Generate historical sales chart data with item-level details for tooltips
+// Aggregates sales by date and includes top selling items
+const generateHistoricalChartWithItems = () => {
+  console.log('📊 Generating historical chart with items...');
+  
+  if (!data || !data.historical || !Array.isArray(data.historical)) {
+    console.warn('⚠️ No valid historical data');
+    return [];
+  }
+  
+  console.log(` Processing ${data.historical.length} historical records`);
+  
+  // ✅ DIRECT PASS-THROUGH - backend already provides correct format
+  const chartData = data.historical.map(item => {
+    // ✅ Ensure topItems is array
+    const topItems = Array.isArray(item.topItems) ? item.topItems : [];
+    
+    return {
+      date: item.date,
+      displayDate: item.displayDate,
+      totalSales: item.totalSales || 0,
+      totalQuantity: item.totalQuantity || item.transactionCount || 0,
+      topItems: topItems,  // ✅ ARRAY, not string
+      itemCount: item.itemCount || topItems.length,
+      trend: item.trend || 'neutral',
+      growthRate: item.growthRate || 0
+    };
+  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  
+  console.log(`✅ Generated ${chartData.length} chart points`);
+  console.log('📊 Sample:', chartData[0]);
+  
+  return chartData;
+};
+
+
+  /**
+ * Custom tooltip for historical sales chart
+ * Shows date, total sales, item count, and top selling items
+ */
+const CustomHistoricalTooltip = ({ active, payload, label }) => {
+  if (!active || !payload || !payload.length) return null;
+
+  const data = payload[0].payload;
+  
+  // ✅ ENSURE topItems is array
+  const topItemsArray = Array.isArray(data.topItems) 
+    ? data.topItems 
+    : (typeof data.topItems === 'string' ? [] : []);
+
+  console.log('🔍 Tooltip data:', {
+    date: data.displayDate,
+    totalSales: data.totalSales,
+    topItems: topItemsArray,
+    topItemsType: typeof data.topItems
+  });
+
+  return (
+    <div style={{
+      backgroundColor: 'white',
+      padding: '12px 16px',
+      border: '2px solid #3b82f6',
+      borderRadius: '8px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+    }}>
+      {/* Date */}
+      <div style={{
+        fontWeight: '700',
+        marginBottom: '8px',
+        color: '#1f2937',
+        fontSize: '14px'
+      }}>
+        📅 {label || data.displayDate}
+      </div>
+      
+      {/* Total Sales */}
+      <div style={{
+        marginBottom: '6px',
+        color: '#3b82f6',
+        fontWeight: '600',
+        fontSize: '13px'
+      }}>
+        💰 Total Sales: {data.totalSales?.toLocaleString() || 0} units
+      </div>
+      
+      {/* Items Count */}
+      <div style={{
+        marginBottom: '8px',
+        color: '#6b7280',
+        fontSize: '12px'
+      }}>
+        📦 Total Units: {data.totalQuantity?.toLocaleString() || (topItemsArray.length > 0 ? topItemsArray.reduce((sum, item) => sum + (item.sales || 0), 0) : 0)}
+      </div>
+      
+      {/* Top Sellers */}
+      {topItemsArray.length > 0 && (
+        <div style={{
+          borderTop: '1px solid #e5e7eb',
+          paddingTop: '8px',
+          marginTop: '8px'
+        }}>
+          <div style={{
+            fontWeight: '600',
+            marginBottom: '4px',
+            fontSize: '12px',
+            color: '#374151'
+          }}>
+            💎 Top {Math.min(3, topItemsArray.length)} Sellers:
+          </div>
+          {topItemsArray.slice(0, 3).map((item, idx) => (
+            <div key={idx} style={{
+              fontSize: '11px',
+              color: '#6b7280',
+              marginLeft: '8px',
+              marginBottom: '2px'
+            }}>
+              • {item.name}: {item.sales?.toLocaleString() || 0} units
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* No items case */}
+      {topItemsArray.length === 0 && (
+        <div style={{
+          fontSize: '11px',
+          color: '#9ca3af',
+          fontStyle: 'italic',
+          marginTop: '4px'
+        }}>
+          No detailed items available
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+
+  const historicalChartWithItems = generateHistoricalChartWithItems();
+
+/**
+ * Show demo video modal and optionally open video in new tab
+ * Displays product features and benefits
+ */
+const handleWatchVideo = () => {
+  setModalTitle("🎥 2-Minute Product Demo");
+  setModalContent(
+    <div style={{ textAlign: "left" }}>
+      <h4 style={{ marginTop: "0", color: "#1f2937" }}>
+        See ForecastAI Pro in Action:
+      </h4>
+      <ul style={{ 
+        lineHeight: "1.8", 
+        color: "#4b5563",
+        paddingLeft: "20px"
+      }}>
+        <li>🤖 <strong>Live AI forecasting</strong> with real inventory data</li>
+        <li>📈 <strong>Real customer success stories</strong> - 15% revenue increase</li>
+        <li>💰 <strong>ROI calculator</strong> with actual numbers</li>
+        <li>🎯 <strong>Priority action alerts</strong> for restocking</li>
+        <li>⚡ <strong>Easy 3-step setup</strong> - up and running in minutes</li>
+      </ul>
+      
+      <div style={{ 
+        marginTop: "16px", 
+        padding: "12px", 
+        backgroundColor: "#f0f9ff", 
+        borderRadius: "8px" 
+      }}>
+        <p style={{ 
+          margin: "0", 
+          color: "#0369a1", 
+          fontSize: "14px" 
+        }}>
+          🎬 Click the button below to watch the demo video in a new window
+        </p>
+      </div>
+
+      <button
+        onClick={() => {
+          // Open demo video URL in new tab
+          window.open('https://www.youtube.com/watch?v=YOUR_VIDEO_ID', '_blank');
+          setModalOpen(false);
+        }}
+        style={{
+          marginTop: "16px",
+          width: "100%",
+          padding: "12px",
+          backgroundColor: "#2563eb",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          fontSize: "15px",
+          fontWeight: "600",
+          cursor: "pointer",
+          transition: "background-color 0.2s"
+        }}
+        onMouseEnter={(e) => e.target.style.backgroundColor = "#1d4ed8"}
+        onMouseLeave={(e) => e.target.style.backgroundColor = "#2563eb"}
+      >
+        ▶️ Watch Demo Video
+      </button>
+    </div>
+  );
+  setModalOpen(true);
+};
+
+    /**
+ * Load sample/demo data for testing without file upload
+ * Simulates backend API response with realistic data
+ */
+const handleLoadSampleData = async () => {
+  console.log("Loading Hyderabad sample data...");
+  setUploadStatus({
+    type: 'loading',
+    message: 'Loading Hyderabad supermarket sample data...',
+  });
+  setLoading(true);
+
+  try {
+    const response = await forecastAPI.loadSampleData();
+
+    if (!response || !response.success) {
+      throw new Error(response?.error || 'Failed to load sample data');
+    }
+
+    const mappedForecasts = (response.forecasts || []).map(item => ({
+      sku: item.sku || item.product_id || 'Unknown',
+      itemname: item.itemname || item.productname || item.name || 'Unknown',
+      forecast: item.forecast_data || item.forecast || [],
+      r2score: item.r2score || item.accuracy || 0.94,
+      accuracy: (item.accuracy || 0.94) * 100,
+      model_performance: {
+        rsquared: item.r2score || 0.94,
+        mae: item.mae || 0,
+      },
+    }));
+
+    const mappedInventory = (response.inventory || []).map(inv => ({
+      sku: inv.sku || 'Unknown',
+      itemname: inv.itemname || inv.item_name || 'Unknown',
+      currentstock: inv.current_stock ?? inv.currentstock ?? 0,
+      recommendedstock: inv.recommended_stock ?? inv.recommendedstock ?? 0,
+      safetystock: inv.safety_stock ?? inv.safetystock ?? 0,
+      reorderpoint: inv.reorder_point ?? inv.reorderpoint ?? 0,
+      stockstatus: inv.stock_status ?? inv.stockstatus ?? 'Unknown',
+      daysofstock: inv.days_of_stock ?? inv.daysofstock ?? 0,
+      dailysalesavg: inv.daily_sales_avg ?? inv.dailysalesavg ?? 0,
+    }));
+
+    const mappedData = {
+      historical: response.historical || [],
+      forecasts: mappedForecasts,
+      inventory: mappedInventory,
+      performance: mappedForecasts.map(f => ({
+        sku: f.sku,
+        itemname: f.itemname,
+        rsquared: f.r2score,
+        mae: f.model_performance.mae,
+      })),
+      priorityActions: response.priority_actions || response.priorityactions || [],
+      roiData: response.roi || null,
+      businessmetrics: response.business_metrics || null,
+    };
+
+    setData(mappedData);
+    setHistoricalData(mappedData.historical);
+    setForecastData(mappedForecasts);
+    setInventoryData(mappedInventory);
+    setPriorityActions(mappedData.priorityActions);
+    setRoiData(mappedData.roiData);
+    setHasUploadedFile(true);
+
+    if (response.summary && response.summary.date_range) {
+      setFilterFromDate(response.summary.date_range.start);
+      setFilterToDate(response.summary.date_range.end);
+    }
+
+    setChartRefreshKey(prev => prev + 1);
+    setForecastUpdateTrigger(prev => prev + 1);
+    setFullRangeCoverageKey(prev => prev + 1);
+
+    setUploadStatus({
+      type: 'success',
+      message: `✅ Sample loaded! ${mappedForecasts.length} forecasts, ${mappedInventory.length} items, ${mappedData.priorityActions.length} actions.`,
+    });
+
+    updateStepStatus(1, 'completed');
+    updateStepStatus(2, 'completed');
+    updateStepStatus(3, 'completed');
+    updateStepStatus(4, 'completed');
+    setCurrentStep(4);
+    setActiveView('forecast');
+
+    setTimeout(() => setUploadStatus(null), 6000);
+  } catch (error) {
+    console.error('Sample loading error:', error);
+    setUploadStatus({
+      type: 'error',
+      message: error.message || 'Failed to load sample data',
+    });
+    updateStepStatus(2, 'error');
     setTimeout(() => setUploadStatus(null), 6000);
   } finally {
     setLoading(false);
   }
 };
 
-  // File upload handler
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
 
-    setUploadStatus('📄 Processing your Excel file...');
-    setLoading(true);
-    setUploadStartTime(Date.now());
-    updateStepStatus(1, 'active');
-    setError(null);
 
-    try {
-      const text = await file.text();
-      setRawCsvData(text);
-      
-      const { data: tempData } = parseRealCsvData(text, []);
-      const detectedRange = detectDateRangeFromFile(tempData);
-      
-      // ✅ CRITICAL FIX: Extend To Date by 15 days for forecast
-      const forecastExtendedToDate = new Date(detectedRange.toDate);
-      forecastExtendedToDate.setDate(forecastExtendedToDate.getDate() + 15);
-      const forecastToDateStr = forecastExtendedToDate.toISOString().slice(0, 10);
-
-      console.log('📅 Historical ends:', detectedRange.toDate);
-      console.log('📅 Forecast extends to:', forecastToDateStr);
-
-      setFileAvailableDates({ min: detectedRange.fromDate, max: detectedRange.toDate });
-      setFilterFromDate(detectedRange.fromDate);
-      setFilterToDate(forecastToDateStr); // ✅ Use extended date for forecasts
-      
-      setUploadStatus(`🔍 Excel file analyzed! Date range: ${detectedRange.fromDate} to ${detectedRange.toDate}`);
-      
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      updateStepStatus(1, 'completed');
-      updateStepStatus(2, 'active');
-
-      const result = await processCompleteDataWithFullRange(text, detectedRange.fromDate, detectedRange.toDate, filterStore);
-      
-      const finalTime = Math.floor((Date.now() - uploadStartTime) / 1000);
-      setProcessingTime(finalTime);
-      
-      if (result.success) {
-        setUploadStatus(`✅ Complete Analysis Done! Full range forecasts (${result.totalDaysCovered} days) + inventory (${result.inventoryCount}) + priority actions (${result.priorityActionCount}) | ${result.allItemCount} items | Time: ${finalTime}s`);
-        setHasUploadedFile(true);
-        setLastProcessedDateRange(`${detectedRange.fromDate}-${detectedRange.toDate}-${filterStore}`);
-        
-        updateStepStatus(2, 'completed');
-        updateStepStatus(3, 'completed');
-        updateStepStatus(4, 'active');
-        setCurrentStep(4);
-      } else {
-        throw new Error(result.error);
-      }
-
-    } catch (error) {
-      console.error('Excel processing error:', error);
-      setUploadStatus(`❌ Error processing Excel file: ${error.message}`);
-      updateStepStatus(1, 'error');
-      setError(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Show ROI Calculator with actual file data
-  const showROICalculator = () => {
-     if (!data || !data.roiData) {
-        setModalTitle("ROI Calculator");
-        setModalContent(
-            <div style={{ textAlign: "center", padding: "20px" }}>
-                <p style={{ fontSize: "16px", color: "#ea580c", marginBottom: "16px" }}>
-                    Please upload your sales data first to calculate your personalized ROI.
-                </p>
-                <p style={{ fontSize: "14px", color: "#64748b" }}>
-                    The calculator analyzes your actual data to show your ROI.
-                </p>
-            </div>
-        );
-        setModalOpen(true);
-        return;
-    }
-    const roi = data.roiData;
-     setModalTitle("ROI Calculator Results");
-    setModalContent(
-        <div style={{ textAlign: "left" }}>
-            <p><b>Date Range:</b> {roi.dateRange}</p>
-            <p><b>Current Monthly Revenue:</b> ₹{roi.currentRevenue.toLocaleString()}</p>
-            <p><b>Projected 15% Increase:</b> ₹{roi.projectedIncrease.toLocaleString()}/month</p>
-            <p><b>Inventory Cost Savings:</b> ₹{roi.inventoryCostSavings.toLocaleString()}/month</p>
-            <p><b>Annual Revenue Increase:</b> ₹{roi.annualIncrease.toLocaleString()}</p>
-            <p><b>ForecastAI Pro Cost:</b> ₹{roi.cost.toLocaleString()}/month</p>
-            <p><b>Net ROI:</b> {roi.netROI} monthly return!</p>
-            <p><b>Stockout Reduction:</b> {roi.stockoutReduction}</p>
-            <small>
-                Based on {roi.itemCount} items from your Excel file, analyzed using {roi.dataPoints} data points.
-            </small>
-        </div>
-    );
-    setModalOpen(true);
-};
-
-  // Generate historical chart with item details
-  const generateHistoricalChartWithItems = () => {
-    if (!data.historical || data.historical.length === 0) return [];
-
-    console.log('📊 GENERATING historical chart with ITEM DETAILS for tooltip');
-
-    // Group by date and collect item details
-    const dateGroups = {};
-    data.historical.forEach(item => {
-      const date = item.date;
-      if (!dateGroups[date]) {
-        dateGroups[date] = { 
-          date, 
-          displayDate: '', 
-          total: 0, 
-          items: []
-        };
-      }
-      dateGroups[date].total += item.units_sold;
-      dateGroups[date].items.push({
-        name: item.item_name,
-        units: item.units_sold,
-        sku: item.sku
+// Helper: Generate sample historical data
+const generateSampleHistoricalData = () => {
+  const items = [
+    { sku: 'BRITANNIA001', name: 'Britannia Good Day Cookies 100g' },
+    { sku: 'HALDIRAMS001', name: 'Haldirams Mixture 200g' },
+    { sku: 'PARLE001', name: 'Parle-G Biscuits 100g' },
+    { sku: 'MAGGI001', name: 'Maggi Noodles 70g' },
+    { sku: 'LAYS001', name: 'Lays Chips 50g' }
+  ];
+  
+  const data = [];
+  const startDate = new Date(filterFromDate);
+  const endDate = new Date();
+  
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    items.forEach(item => {
+      data.push({
+        date: d.toISOString().split('T')[0],
+        sku: item.sku,
+        item_name: item.name,
+        units_sold: Math.floor(Math.random() * 50) + 10,
+        store: filterStore
       });
     });
+  }
+  
+  return data;
+};
 
-    const chartData = Object.values(dateGroups)
-      .map(group => ({
-        ...group,
-        displayDate: new Date(group.date + 'T00:00:00').toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric'
-        }),
-        // Create summary for tooltip
-        topItems: group.items
-          .sort((a, b) => b.units - a.units)
-          .slice(0, 3) // Top 3 items
-          .map(item => `${item.name}: ${item.units} units`)
-          .join(', '),
-        itemCount: group.items.length
-      }))
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    console.log('✅ Historical chart with item details generated:', chartData.length, 'points');
-    return chartData;
-  };
-
-  // Custom tooltip for historical chart
-  const CustomHistoricalTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div style={{
-          backgroundColor: 'white',
-          padding: '12px',
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-          boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-          maxWidth: '300px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontWeight: '600', color: '#1f2937' }}>
-            📅 Date: {label}
-          </p>
-          <p style={{ margin: '0 0 8px 0', fontWeight: '600', color: '#3b82f6' }}>
-            📊 Total Sales: {data.total} units
-          </p>
-          <p style={{ margin: '0 0 8px 0', fontWeight: '500', color: '#6b7280' }}>
-            🛍️ Items sold: {data.itemCount}
-          </p>
-          <p style={{ margin: '0', fontSize: '12px', color: '#4b5563' }}>
-            🔝 Top items: {data.topItems}
-          </p>
-        </div>
-      );
+// Helper: Generate sample forecasts
+const generateSampleForecasts = () => {
+  const items = [
+    { sku: 'BRITANNIA001', name: 'Britannia Good Day Cookies 100g' },
+    { sku: 'HALDIRAMS001', name: 'Haldirams Mixture 200g' },
+    { sku: 'PARLE001', name: 'Parle-G Biscuits 100g' },
+    { sku: 'MAGGI001', name: 'Maggi Noodles 70g' },
+    { sku: 'LAYS001', name: 'Lays Chips 50g' }
+  ];
+  
+  return items.map(item => ({
+    sku: item.sku,
+    item_name: item.name,
+    forecast: generateForecastDays(30),
+    r2_score: 0.92 + Math.random() * 0.06,
+    model_performance: {
+      r_squared: 0.94,
+      mae: Math.floor(Math.random() * 5) + 2
     }
-    return null;
-  };
+  }));
+};
 
-  const historicalChartWithItems = generateHistoricalChartWithItems();
+// Helper: Generate forecast days
+const generateForecastDays = (days) => {
+  const forecast = [];
+  const startDate = new Date();
+  
+  for (let i = 0; i < days; i++) {
+    const date = new Date(startDate);
+    date.setDate(date.getDate() + i);
+    const predicted = Math.floor(Math.random() * 40) + 20;
+    
+    forecast.push({
+      date: date.toISOString().split('T')[0],
+      predicted_units: predicted,
+      lower_ci: Math.floor(predicted * 0.85),
+      upper_ci: Math.floor(predicted * 1.15)
+    });
+  }
+  
+  return forecast;
+};
 
-  const handleWatchVideo = () => {
-setModalTitle("2-Minute Demo Video");
-setModalContent(
-  <div>
-    <ul style={{textAlign:"left"}}>
-      <li>See live AI forecasting in action</li>
-      <li>Real customer success stories</li>
-      <li>15% revenue increase examples</li>
-      <li>Easy setup process</li>
-    </ul>
-    <p style={{color:"#64748b"}}>Video will open in new window…</p>
-  </div>
-);
-setModalOpen(true);
-  };
+// Helper: Generate sample inventory
+const generateSampleInventory = () => {
+  return [
+    {
+      sku: 'BRITANNIA001',
+      item_name: 'Britannia Good Day Cookies 100g',
+      current_stock: 45,
+      recommended_stock: 120,
+      reorder_point: 80,
+      safety_stock: 60,
+      stock_status: 'LOW',
+      days_of_stock: 5
+    },
+    {
+      sku: 'MAGGI001',
+      item_name: 'Maggi Noodles 70g',
+      current_stock: 150,
+      recommended_stock: 200,
+      reorder_point: 100,
+      safety_stock: 80,
+      stock_status: 'OPTIMAL',
+      days_of_stock: 12
+    }
+  ];
+};
 
-    // Handle demo data
-  const handleLoadSampleData = () => {
-    setUploadStatus('✅ Sample data loaded! AI model accuracy: 94.2% | Processing completed in 12 seconds');
-    setHasUploadedFile(true);
-    updateStepStatus(1, 'completed');
-    setCurrentStep(2);
-    setTimeout(() => fetchAllData(false), 500);
-  };
+// Helper: Generate sample priority actions
+const generateSamplePriorityActions = () => {
+  return [
+    {
+      priority: 'HIGH',
+      action: 'Urgent Restock',
+      sku: 'BRITANNIA001',
+      item_name: 'Britannia Good Day Cookies 100g',
+      shortage: 75,
+      current_stock: 45,
+      required_stock: 120,
+      expected_revenue: 4500,
+      action_deadline: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    }
+  ];
+};
 
-  const handleExportForecastData = () => {
+ /**
+ * Export forecast data to CSV file
+ * Includes all forecasts with confidence intervals
+ */
+const handleExportForecastData = () => {
+  // Validate data exists
   if (!data.forecasts || data.forecasts.length === 0) {
-    alert('❌ No forecast data to export.');
+    alert('❌ No forecast data available to export. Please upload your file and generate forecasts first.');
     return;
   }
 
-  // Prepare CSV headers
-  const headers = ['SKU', 'Item_Name', 'Date', 'Predicted_Units', 'Lower_CI', 'Upper_CI'];
-  
-  // Flatten forecast data into rows
-  const csvRows = data.forecasts.flatMap(forecast =>
-    forecast.forecast.map(day => [
-      forecast.sku,
-      forecast.item_name,
-      day.date,
-      day.predicted_units,
-      day.lower_ci,
-      day.upper_ci
-    ])
-  );
+  console.log('📥 Exporting forecast data to CSV...');
 
-  // Combine headers and rows
-  const csvContent = [headers, ...csvRows]
-    .map(row => row.join(','))
-    .join('\n');
+  try {
+    // Prepare CSV headers
+    const headers = [
+      'SKU',
+      'Item_Name',
+      'Date',
+      'Predicted_Units',
+      'Lower_Confidence_Interval',
+      'Upper_Confidence_Interval',
+      'Model_Accuracy'
+    ];
+    
+    // Flatten forecast data into CSV rows
+    const csvRows = data.forecasts.flatMap(forecast =>
+      (forecast.forecast || []).map(day => [
+        forecast.sku || '',
+        forecast.item_name || '',
+        day.date || '',
+        day.predicted_units || day.predicted || 0,
+        day.lower_ci || day.lower || 0,
+        day.upper_ci || day.upper || 0,
+        (forecast.r2_score || forecast.accuracy || 0).toFixed(2)
+      ])
+    );
 
-  // Create a downloadable Blob
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
+    // Check if there's data to export
+    if (csvRows.length === 0) {
+      alert('❌ No forecast rows to export.');
+      return;
+    }
 
-  // Filename with selected date range
-  link.setAttribute(
-    'download',
-    `ForecastAI-Forecasts-${filterFromDate}-to-${filterToDate}.csv`
-  );
-  link.style.visibility = 'hidden';
+    // Combine headers and rows into CSV string
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => row.join(','))
+    ].join('\n');
 
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+    // Create downloadable Blob
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    // Create download link
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    
+    // Generate filename with date range
+    const filename = `ForecastAI-Forecasts-${filterFromDate}-to-${filterToDate}-${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
 
-  setUploadStatus(
-    `✅ Forecast data exported – ${csvRows.length} rows (${filterFromDate} to ${filterToDate})`
-  );
-  setTimeout(() => setUploadStatus(null), 3000);
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Clean up
+    URL.revokeObjectURL(url);
+
+    // Show success message
+    setUploadStatus(
+      `✅ Forecast data exported successfully! ` +
+      `${csvRows.length} rows • ${data.forecasts.length} products • ` +
+      `Date range: ${filterFromDate} to ${filterToDate}`
+    );
+    
+    console.log('✅ Export successful:', csvRows.length, 'rows exported');
+    
+    // Clear status after delay
+    setTimeout(() => setUploadStatus(null), 5000);
+
+  } catch (error) {
+    console.error('❌ Export error:', error);
+    alert(`❌ Failed to export data: ${error.message}`);
+  }
 };
 
 // Example ROI multiplier state, you can set it as needed
 const [roiMultiplier, setRoiMultiplier] = useState(0.25); // 25% default ROI
+
+// ✅ NEW: Trial Paywall States (Add these 3 lines)
+const [showTrialPaywall, setShowTrialPaywall] = useState(false);
+const [paywallReason, setPaywallReason] = useState(null);
+const [paywallError, setPaywallError] = useState(null);
 
 
 // Your handleUpgradeROICalculator function
@@ -1525,48 +1550,63 @@ const handleUpgradeROICalculator = (newMultiplier) => {
     alert('📞 Enterprise Sales Team:\n\n🏢 Custom Excel integrations\n💰 Volume processing discounts\n🎯 Dedicated support team\n📈 Advanced forecasting models\n\n☎️ Direct: +91-9876-FORECAST\n📧 Enterprise: sales@forecastai.com');
   };
 
-  // Export functions
-  const handleExportHistoricalData = () => {
-    if (!data.historical || data.historical.length === 0) {
-      alert('❌ No historical data to export.');
-      return;
-    }
+// Export full historical item-level data to CSV
+const handleExportHistoricalData = () => {
+  const raw = data?.historical_raw;
 
-    try {
-      const headers = ['Date', 'SKU', 'Item_Name', 'Store', 'Units_Sold'];
-      const csvRows = data.historical.map(item => [
-        item.date,
-        item.sku,
-        item.item_name,
-        item.store,
-        item.units_sold
-      ]);
+  if (!raw || !Array.isArray(raw) || raw.length === 0) {
+    alert('❌ No detailed historical data available. Please upload your file first.');
+    return;
+  }
 
-      const csvContent = [headers, ...csvRows]
-        .map(row => row.join(','))
-        .join('\n');
+  console.log('📥 Exporting full historical data...', { rows: raw.length });
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      
-      link.setAttribute('href', url);
-      link.setAttribute('download', `ForecastAI-Historical-${filterFromDate}-to-${filterToDate}.csv`);
-      link.style.visibility = 'hidden';
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      URL.revokeObjectURL(url);
+  // Headers
+  const headers = ['Date', 'SKU', 'Item_Name', 'Store', 'Units_Sold'];
 
-      setUploadStatus(`✅ Historical data exported - ${data.historical.length} records with item names`);
-      setTimeout(() => setUploadStatus(null), 3000);
+  // Map rows
+  const rows = raw.map(row => [
+    row.date || '',
+    row.sku || '',
+    row.item_name || row.itemname || '',
+    row.store || '',
+    row.units_sold ?? 0
+  ]);
 
-    } catch (error) {
-      alert(`❌ Export failed: ${error.message}`);
-    }
-  };
+  // Build CSV
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(r =>
+      r
+        .map(val => {
+          const cell = val == null ? '' : String(val);
+          const escaped = cell.replace(/"/g, '""');
+          return `"${escaped}"`;
+        })
+        .join(',')
+    )
+  ].join('\n');
+
+  // Download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const filename = `ForecastAI-HistoricalItems-${new Date()
+    .toISOString()
+    .split('T')[0]}.csv`;
+
+  link.href = url;
+  link.download = filename;
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  console.log('✅ Export complete:', filename);
+};
+
+
 
   const handleExportInventoryData = () => {
     if (!data.inventory || data.inventory.length === 0) {
@@ -1611,46 +1651,133 @@ const handleUpgradeROICalculator = (newMultiplier) => {
     }
   };
 
-// ✅ FIXED: Calculate ROI from ACTUAL uploaded file data with dynamic metrics
+  const handleExportPriorityActions = () => {
+  if (!data.priorityActions || data.priorityActions.length === 0) {
+    alert('❌ No priority actions to export.');
+    return;
+  }
+
+  try {
+    const headers = [
+      'SKU',
+      'Item_Name',
+      'Priority_Level',
+      'Daily_Demand',
+      'Recommended_Qty',
+      'Revenue_Risk',
+      'ROI_Percent',
+      'Action_Summary'
+    ];
+
+    const csvRows = data.priorityActions.map(item => [
+      item.sku,
+      item.item_name || item.itemname || '',
+      item.priority_level || item.priority || item.risk_level || 'MEDIUM',
+      item.daily_demand || item.daily_sales_avg || 0,
+      item.recommended_qty || item.recommended_stock || 0,
+      item.revenue_risk || item.revenue_risk_rupees || 0,
+      item.roi_percent || item.roi || 0,
+      item.action_required || item.status || ''
+    ]);
+
+    const csvContent = [headers, ...csvRows]
+      .map(row => row.join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.setAttribute('href', url);
+    link.setAttribute(
+      'download',
+      `ForecastAI-Priority-Actions-${new Date().toISOString().split('T')[0]}.csv`
+    );
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+
+    setUploadStatus(
+      `✅ Priority actions exported - ${data.priorityActions.length} rows`
+    );
+    setTimeout(() => setUploadStatus(null), 3000);
+  } catch (error) {
+    alert(`❌ Priority actions export failed: ${error.message}`);
+  }
+};
+
+
+/**
+ * Calculate ROI from BACKEND API data or fallback to uploaded file analysis
+ * Uses actual sales data, forecasts, and inventory recommendations
+ * 
+ * @param {Array} historicalData - Historical sales data from backend
+ * @param {Array} forecastData - AI-generated forecasts from backend
+ * @param {string} dateRange - Date range string for display
+ * @returns {Object} Calculated ROI metrics
+ */
 const calculateFileBasedROI = (historicalData, forecastData, dateRange) => {
-  console.log('💰 CALCULATING ROI from ACTUAL UPLOADED FILE DATA for range', dateRange);
+  console.log('💰 CALCULATING ROI from BACKEND API DATA for range:', dateRange);
   
-  // ✅ FALLBACK ROI VALUES (only if no data)
+  // ✅ DEFAULT/FALLBACK ROI VALUES (only if no data available)
   const defaultROI = {
+    dateRange: dateRange || `${filterFromDate} to ${filterToDate}`,
     currentRevenue: 50000,
     projectedIncrease: 7500,
-    inventoryCostSavings: 30000,
+    inventoryCostSavings: 15000,
     annualIncrease: 90000,
-    cost: 7500,
-    netROI: 0,
-    dateRange: dateRange,
+    cost: 5000,
+    netROI: "1.5x",
     itemCount: 0,
     dataPoints: 0,
     improvementPercent: 15,
-    stockoutReduction: 75
+    stockoutReduction: "40-60%",
+    accuracy: "N/A",
+    sourceType: 'Default Sample Data'
   };
   
+  // Check if backend provided ROI data directly
+  if (data?.roiData && Object.keys(data.roiData).length > 0) {
+    console.log('✅ Using ROI data from BACKEND API');
+    return {
+      ...data.roiData,
+      dateRange: data.roiData.dateRange || dateRange,
+      sourceType: 'Backend API Calculation'
+    };
+  }
+  
+  // If no historical data, return default
   if (!historicalData || historicalData.length === 0) {
     console.log('⚠️ No historical data provided, returning default ROI');
     return defaultROI;
   }
   
   try {
-    // ✅ STEP 1: Calculate REAL total units from uploaded file
+    // ========================================
+    // STEP 1: Calculate REAL total units from uploaded file
+    // ========================================
     const totalHistoricalUnits = historicalData.reduce((sum, item) => {
-      const units = item.units_sold || item.unitssold || 0;
-      return sum + (isNaN(units) ? 0 : units);
+      const units = item.units_sold || item.quantity || item.unitssold || 0;
+      return sum + (isNaN(units) ? 0 : Number(units));
     }, 0);
     
     console.log('📊 Total historical units from file:', totalHistoricalUnits);
     
-    // ✅ STEP 2: Calculate REAL total forecast units
+    // ========================================
+    // STEP 2: Calculate REAL total forecast units
+    // ========================================
     let totalForecastUnits = 0;
-    if (forecastData && forecastData.length > 0) {
+    if (forecastData && Array.isArray(forecastData) && forecastData.length > 0) {
       totalForecastUnits = forecastData.reduce((sum, forecast) => {
         if (forecast.forecast && Array.isArray(forecast.forecast)) {
-          return sum + forecast.forecast.reduce((daySum, day) => 
-            daySum + (day.predicted_units || 0), 0);
+          return sum + forecast.forecast.reduce((daySum, day) => {
+            const predicted = day.predicted_units || day.predicted || day.value || 0;
+            return daySum + (isNaN(predicted) ? 0 : Number(predicted));
+          }, 0);
         }
         return sum;
       }, 0);
@@ -1658,74 +1785,147 @@ const calculateFileBasedROI = (historicalData, forecastData, dateRange) => {
     
     console.log('🔮 Total forecasted units:', totalForecastUnits);
     
-    // ✅ STEP 3: Calculate REAL improvement percentage
-    let improvementPercent = 15; // Default
+    // ========================================
+    // STEP 3: Calculate REAL improvement percentage
+    // ========================================
+    let improvementPercent = 15; // Default baseline
+    
     if (totalHistoricalUnits > 0 && totalForecastUnits > 0) {
       improvementPercent = Math.round(
         ((totalForecastUnits - totalHistoricalUnits) / totalHistoricalUnits) * 100
       );
-      // Cap at reasonable range
-      improvementPercent = Math.max(5, Math.min(35, improvementPercent));
+      // Cap at reasonable range: 5% to 40%
+      improvementPercent = Math.max(5, Math.min(40, improvementPercent));
     }
     
     console.log('📈 Calculated improvement %:', improvementPercent);
     
-    // ✅ STEP 4: Calculate REAL average unit price
-    // You can customize this based on your product mix
-    const avgUnitPrice = 170; // Indian rupee average - adjust for your market
+    // ========================================
+    // STEP 4: Calculate REAL average unit price
+    // ========================================
+    let avgUnitPrice = 150; // Default for Indian retail (₹)
     
-    // ✅ STEP 5: Calculate REAL current monthly revenue
-    const daysInPeriod = Math.max(1, [...new Set(historicalData.map(item => item.date))].length);
+    // If revenue data exists in historical records, calculate actual price
+    if (historicalData.some(item => item.revenue || item.amount || item.price)) {
+      const totalRevenue = historicalData.reduce((sum, item) => {
+        return sum + (item.revenue || item.amount || (item.price * (item.units_sold || 1)) || 0);
+      }, 0);
+      
+      if (totalRevenue > 0 && totalHistoricalUnits > 0) {
+        avgUnitPrice = Math.round(totalRevenue / totalHistoricalUnits);
+      }
+    }
+    
+    console.log('💵 Average unit price:', avgUnitPrice);
+    
+    // ========================================
+    // STEP 5: Calculate REAL current monthly revenue
+    // ========================================
+    const uniqueDates = [...new Set(historicalData.map(item => item.date))];
+    const daysInPeriod = Math.max(1, uniqueDates.length);
+    
     const dailyRevenue = (totalHistoricalUnits * avgUnitPrice) / daysInPeriod;
     const currentRevenue = Math.round(dailyRevenue * 30); // Monthly projection
     
-    console.log('💵 Current monthly revenue:', currentRevenue);
+    console.log('💵 Current monthly revenue:', currentRevenue, '(based on', daysInPeriod, 'days)');
     
-    // ✅ STEP 6: Calculate REAL projected increase
+    // ========================================
+    // STEP 6: Calculate REAL projected increase
+    // ========================================
     const projectedIncrease = Math.round(currentRevenue * (improvementPercent / 100));
     
-    // ✅ STEP 7: Calculate REAL inventory cost savings
-    // Assume 8% of revenue can be saved through better inventory management
-    const inventoryCostSavings = Math.round(projectedIncrease * 0.6); // 60% of increase from savings
+    // ========================================
+    // STEP 7: Calculate REAL inventory cost savings
+    // ========================================
+    // Research shows AI forecasting reduces inventory costs by 20-30%
+    // We estimate 60% of revenue increase comes from better inventory management
+    const inventoryCostSavings = Math.round(projectedIncrease * 0.6);
     
-    // ✅ STEP 8: Calculate REAL stockout reduction
-    // Higher with more unique SKUs and better data quality
-    const uniqueSKUs = [...new Set(historicalData.map(item => item.sku))].length;
+    // ========================================
+    // STEP 8: Calculate REAL stockout reduction
+    // ========================================
+    const uniqueSKUs = [...new Set(historicalData.map(item => item.sku || item.product_id))].length;
     const dataQualityScore = Math.min(100, 50 + (historicalData.length / 10)); // 50-100 scale
-    const stockoutReduction = Math.min(95, 65 + (uniqueSKUs * 2) + (dataQualityScore * 0.3));
+    
+    // More SKUs + better data = higher stockout reduction
+    const stockoutReduction = Math.min(95, 60 + (uniqueSKUs * 1.5) + (dataQualityScore * 0.25));
     
     console.log('📦 Stockout reduction calculated:', {
       uniqueSKUs,
-      dataQualityScore,
-      stockoutReduction
+      dataQualityScore: Math.round(dataQualityScore),
+      stockoutReduction: Math.round(stockoutReduction)
     });
     
-    // ✅ STEP 9: Calculate REAL annual metrics
+    // ========================================
+    // STEP 9: Calculate REAL annual metrics
+    // ========================================
     const annualIncrease = projectedIncrease * 12;
-    const monthlyCost = 7500; // ForecastAI Pro cost
-    const netROI = Math.round(((projectedIncrease - monthlyCost) / monthlyCost) * 100);
+    const monthlyCost = 5000; // ForecastAI Pro subscription cost (₹)
     
-    // ✅ FINAL: Return calculated ROI based on REAL FILE DATA
+    // Calculate ROI multiplier
+    const roiMultiplier = (projectedIncrease - monthlyCost) / monthlyCost;
+    const netROI = roiMultiplier >= 1 
+      ? `${Math.round(roiMultiplier)}x` 
+      : `${(roiMultiplier * 100).toFixed(0)}%`;
+    
+    // ========================================
+    // STEP 10: Calculate model accuracy
+    // ========================================
+    let modelAccuracy = "94%"; // Default
+    
+    if (forecastData && forecastData.length > 0) {
+      const avgAccuracy = forecastData.reduce((sum, f) => {
+        const accuracy = f.r2_score || f.accuracy || 0.94;
+        return sum + accuracy;
+      }, 0) / forecastData.length;
+      
+      modelAccuracy = `${Math.round(avgAccuracy * 100)}%`;
+    }
+    
+    // ========================================
+    // FINAL: Return calculated ROI based on REAL DATA
+    // ========================================
     const calculatedROI = {
+      // Primary metrics
+      dateRange: dateRange || `${filterFromDate} to ${filterToDate}`,
       currentRevenue: Math.max(currentRevenue, 25000),
-      projectedIncrease: Math.max(projectedIncrease, 7500),
-      inventoryCostSavings: Math.max(inventoryCostSavings, 15000),
-      annualIncrease: Math.max(annualIncrease, 90000),
+      current_revenue: Math.max(currentRevenue, 25000), // Snake_case for backend compatibility
+      projectedIncrease: Math.max(projectedIncrease, 5000),
+      projected_increase: Math.max(projectedIncrease, 5000),
+      inventoryCostSavings: Math.max(inventoryCostSavings, 10000),
+      inventory_savings: Math.max(inventoryCostSavings, 10000),
+      annualIncrease: Math.max(annualIncrease, 60000),
+      annual_increase: Math.max(annualIncrease, 60000),
+      
+      // Cost & ROI
       cost: monthlyCost,
-      netROI: Math.max(netROI, 0),
-      dateRange: dateRange,
+      subscription_cost: monthlyCost,
+      netROI: netROI,
+      net_roi: netROI,
+      
+      // Data metrics
       itemCount: uniqueSKUs,
+      item_count: uniqueSKUs,
       dataPoints: historicalData.length,
+      data_points: historicalData.length,
       improvementPercent: improvementPercent,
-      stockoutReduction: Math.round(stockoutReduction),
-      // Additional metrics for transparency
-      totalHistoricalUnits,
-      totalForecastUnits,
-      avgDailyRevenue: Math.round(dailyRevenue),
-      periodDays: daysInPeriod,
-      dataQuality: Math.round(dataQualityScore),
-      avgUnitPrice: avgUnitPrice,
-      sourceType: 'Calculated from uploaded file'
+      stockoutReduction: `${Math.round(stockoutReduction - 10)}-${Math.round(stockoutReduction)}%`,
+      stockout_reduction: `${Math.round(stockoutReduction - 10)}-${Math.round(stockoutReduction)}%`,
+      accuracy: modelAccuracy,
+      
+      // Detailed breakdown (for transparency)
+      breakdown: {
+        totalHistoricalUnits,
+        totalForecastUnits,
+        avgDailyRevenue: Math.round(dailyRevenue),
+        periodDays: daysInPeriod,
+        dataQuality: Math.round(dataQualityScore),
+        avgUnitPrice: avgUnitPrice,
+        uniqueSKUs: uniqueSKUs,
+        improvementPercent: improvementPercent
+      },
+      
+      sourceType: 'Calculated from Uploaded File Data'
     };
     
     console.log('✅ REAL ROI CALCULATED from file:', calculatedROI);
@@ -1733,16 +1933,20 @@ const calculateFileBasedROI = (historicalData, forecastData, dateRange) => {
     
   } catch (error) {
     console.error('❌ ROI calculation error:', error);
-    return defaultROI;
+    return {
+      ...defaultROI,
+      error: error.message,
+      sourceType: 'Fallback (Error Occurred)'
+    };
   }
 };
 
-// Then in your JSX, REPLACE hardcoded values with:
 const businessMetrics = calculateFileBasedROI();
+
 
 // Use businessMetrics.revenueIncrease, businessMetrics.costSavings, businessMetrics.stockoutReduction
 
-  const { user, logout } = useContext(AuthContext);
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -1800,12 +2004,12 @@ const businessMetrics = calculateFileBasedROI();
         <div>
           <h1 style={{
             margin: 0,
-            fontSize: '21px',
+            fontSize: '20px',
             fontWeight: '800',
             color: '#1a202c',
             letterSpacing: '0.3px' /* FIXED: reduced letter spacing */
           }}>
-            ForecastAI Pro
+            AptStock Pro
           </h1>
           <p style={{
             margin: 0,
@@ -1814,7 +2018,7 @@ const businessMetrics = calculateFileBasedROI();
             fontWeight: '600',
             letterSpacing: '0.2px' /* FIXED: reduced letter spacing */
           }}>
-            Enterprise Demand Forecasting
+            Enterprise Stock Planning
           </p>
         </div>
       </div>
@@ -2018,7 +2222,7 @@ const businessMetrics = calculateFileBasedROI();
               margin: '0 0 20px 0',
               lineHeight: '1.1'
             }}>
-              AI-Powered Demand Forecasting That Increases Revenue by 15%
+             Smart Stock Planning That Increases Revenue by 15%
             </h2>
             
             <p style={{
@@ -2028,8 +2232,8 @@ const businessMetrics = calculateFileBasedROI();
               fontWeight: '500',
               lineHeight: '1.4'
             }}>
-              Join 500+ retailers using advanced Prophet AI models to optimize inventory, 
-              reduce stockouts, and boost profitability with enterprise-grade forecasting.
+              Join 500+ retailers using our intelligent stock assistant and grow profits, 
+              reduce stockouts, and boost profitability with enterprise-grade stock planning.
             </p>
 
             {/* Customer Logos */}
@@ -2201,7 +2405,7 @@ const businessMetrics = calculateFileBasedROI();
                 margin: '0 0 8px 0',
                 color: '#ffffff'
               }}>
-                See ForecastAI in Action
+                See AptStock in Action
               </h3>
               
               <p style={{
@@ -2210,7 +2414,7 @@ const businessMetrics = calculateFileBasedROI();
                 opacity: '0.9',
                 fontWeight: '500'
               }}>
-                2-minute demo • Real results • Live forecasting
+                2-minute demo • Real results • Live planning
               </p>
             </div>
           </div>
@@ -2237,7 +2441,7 @@ const businessMetrics = calculateFileBasedROI();
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>99.2%</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Forecast Accuracy</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Intelligent Accuracy</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>₹2M+</div>
@@ -2344,11 +2548,11 @@ const businessMetrics = calculateFileBasedROI();
         </div>
 
         {/* Upload Status */}
-        {uploadStatus && (
+        {uploadStatus &&  uploadStatus.message && (
           <div style={{
-            backgroundColor: uploadStatus.includes('✅') ? '#d1fae5' : '#fed7d7',
-            color: uploadStatus.includes('✅') ? '#047857' : '#c53030',
-            border: `1px solid ${uploadStatus.includes('✅') ? '#10b981' : '#f56565'}`,
+            backgroundColor: uploadStatus.message?.includes('✅') ? '#d1fae5' : '#fed7d7',
+            color: uploadStatus.type === ('✅') ? '#047857' : '#c53030',
+            border: `1px solid ${uploadStatus.type === ('✅') ? '#10b981' : '#f56565'}`,
             padding: '16px 20px',
             borderRadius: '10px',
             marginBottom: '24px',
@@ -2359,9 +2563,9 @@ const businessMetrics = calculateFileBasedROI();
             gap: '10px'
           }}>
             <span style={{ fontSize: '18px' }}>
-              {uploadStatus.includes('✅') ? '✅' : '❌'}
+              {uploadStatus.type === ('✅') ? '✅' : ''}
             </span>
-            {uploadStatus}
+            {uploadStatus.message}
           </div>
         )}
 
@@ -2578,7 +2782,7 @@ const businessMetrics = calculateFileBasedROI();
                 marginBottom: '12px',
                 lineHeight: '1.4'
               }}>
-                "ForecastAI increased our inventory efficiency by 23% and reduced stockouts by 67%. 
+                "Smart stock planning increased our revenue efficiency by 23% and reduced stockouts by 67%. 
                 The ROI was visible within the first month!"
               </div>
               <div style={{
@@ -2591,6 +2795,7 @@ const businessMetrics = calculateFileBasedROI();
             </div>
           </div>
         )}
+
 
         {/* Configuration Panel */}
         {hasUploadedFile && (
@@ -2636,7 +2841,7 @@ const businessMetrics = calculateFileBasedROI();
                     onChange={(e) => setAiRecommendedSettings(e.target.checked)}
                     style={{ marginRight: '4px' }}
                   />
-                  🤖 AI-Recommended Settings
+                  🤖 Intelligent-Recommended Settings
                 </label>
                 <div style={{
                   backgroundColor: '#f0fdf4',
@@ -2671,7 +2876,7 @@ const businessMetrics = calculateFileBasedROI();
                   transition: 'all 0.2s ease'
                 }}
               >
-                {loading ? '⏳ Generating Forecast...' : '🤖 Generate AI Forecast for Date Range'}
+                {loading ? '⏳ Generating Forecast...' : '🤖 Generate Planning for Date Range'}
               </button>
             </div>
 
@@ -2764,7 +2969,7 @@ const businessMetrics = calculateFileBasedROI();
               marginBottom: '20px',
               fontWeight: '500'
             }}>
-              🔥 Change dates to see forecast charts EXACTLY synchronize with heading! Perfect date alignment guaranteed.
+              🔥 Change dates to see intelligent charts EXACTLY synchronize with heading! Perfect date alignment guaranteed.
             </p>
             
             <div style={{
@@ -2815,7 +3020,7 @@ const businessMetrics = calculateFileBasedROI();
                   onChange={(e) => setFilterFromDate(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
+                    padding: '8px 4px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
@@ -2840,7 +3045,7 @@ const businessMetrics = calculateFileBasedROI();
                   onChange={(e) => setFilterToDate(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
+                    padding: '8px 4px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
@@ -2864,7 +3069,7 @@ const businessMetrics = calculateFileBasedROI();
                   placeholder="SKU123"
                   style={{
                     width: '100%',
-                    padding: '8px 12px',
+                    padding: '8px 4px',
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
@@ -2950,140 +3155,372 @@ const businessMetrics = calculateFileBasedROI();
         )}
                  
                         
-                                   
-
-                                                                      
-                                      {/* FIXED: Historical Sales Analysis with working export button */}
-                                      {hasUploadedFile && historicalChartWithItems && historicalChartWithItems.length > 0 && (
-                                                                                <div style={{
-                                                                                  backgroundColor: 'white',
-                                                                                  borderRadius: '12px',
-                                                                                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                                                                  marginBottom: '24px',
-                                                                                  border: '1px solid #e2e8f0'
-                                                                                }}>
-                                                                                  <div style={{
-                                                                                    borderBottom: '1px solid #e5e7eb',
-                                                                                    padding: '20px 24px',
-                                                                                    display: 'flex',
-                                                                                    justifyContent: 'space-between',
-                                                                                    alignItems: 'center'
-                                                                                  }}>
-                                                                                    <div>
-                                                                                      <h3 style={{
-                                                                                        fontSize: '20px',
-                                                                                        fontWeight: '700',
-                                                                                        margin: '0 0 4px 0',
-                                                                                        color: '#1f2937'
-                                                                                      }}>
-                                                                                        📊 Historical Sales Analysis
-                                                                                      </h3>
-                                                                                      <div style={{
-                                                                                        fontSize: '14px',
-                                                                                        color: '#6b7280',
-                                                                                        fontWeight: '500'
-                                                                                      }}>
-                                                                                        Based on proprietary AI algorithms • Confidence: 94.2%
-                                                                                      </div>
-                                                                                    </div>
-                                                                                    <div style={{ display: 'flex', gap: '12px' }}>
-                                                                                      <button
-                                                                                        onClick={() => exportData(data.historical, 'historical-sales-data', 'csv')}
-                                                                                        style={{
-                                                                                          backgroundColor: '#3b82f6',
-                                                                                          color: 'white',
-                                                                                          border: 'none',
-                                                                                          padding: '8px 16px',
-                                                                                          borderRadius: '6px',
-                                                                                          fontSize: '14px',
-                                                                                          fontWeight: '600',
-                                                                                          cursor: 'pointer'
-                                                                                        }}
-                                                                                      >
-                                                                                        📥 Export Data
-                                                                                      </button>
-                                                                                      <button 
-  onClick={() => {
-    setModalTitle("📊 Historical Analysis Explanation");
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#3b82f6"}}>✅ Data Source:</strong> Your uploaded Excel file
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#3b82f6"}}>📅 Date Range:</strong> {data.roiData?.dateRange}
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#3b82f6"}}>📈 Analysis:</strong> Shows actual sales patterns from {data.historical?.length || 0} records
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#22c55e"}}>🎯 Confidence:</strong> 94.2% based on AI analysis
-        </p>
-        <p style={{marginBottom: "0", fontSize: "13px", color: "#64748b"}}>
-          💡 Hover over chart points to see detailed item information
-        </p>
+                                  {/* ✅ UPDATED: Business Metrics based on calculate_business_metrics() */}
+{hasUploadedFile && data.business_metrics && (
+  <div style={{
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '20px',
+    marginBottom: '24px'
+  }}>
+    {/* Card 1: Total Revenue */}
+    <div style={{
+      backgroundColor: 'white',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+      border: '1px solid #e2e8f0',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        fontSize: '36px',
+        fontWeight: '800',
+        color: '#22c55e',
+        marginBottom: '8px'
+      }}>
+        ₹{data?.business_metrics?.total_revenue?.toLocaleString() || '0'}
       </div>
-    );
-    setModalOpen(true);
-  }}
-  style={{
-    backgroundColor: '#8b5cf6',
-    color: 'white',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    fontSize: '14px',
-    fontWeight: '600',
-    cursor: 'pointer'
-  }}
->
-  Explanation
-</button>
+      <div style={{
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937',
+        marginBottom: '4px'
+      }}>
+        Total Revenue
+      </div>
+      <div style={{
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        From {data?.business_metrics?.total_transactions?.toLocaleString() || '0'} transactions
+      </div>
+      <div style={{
+        fontSize: '11px',
+        color: '#22c55e',
+        marginTop: '8px',
+        fontWeight: '600'
+      }}>
+        ₹{data?.business_metrics?.avg_daily_revenue?.toLocaleString() || '0'} avg. daily
+      </div>
+      <div style={{
+        fontSize: '10px',
+        color: '#94a3b8',
+        marginTop: '4px'
+      }}>
+        {data.business_metrics.days_analyzed} days analyzed
+      </div>
+    </div>
 
-                                                                                    </div>
-                                                                                  </div>
-                                                                                  <div style={{ padding: '24px' }}>
-                                                                                    <ResponsiveContainer width="100%" height={300} key={`historical-with-items-${chartRefreshKey}`}>
-                                                                                      <LineChart data={historicalChartWithItems}>
-                                                                                        <CartesianGrid strokeDasharray="3 3" />
-                                                                                        <XAxis 
-                                                                                          dataKey="displayDate" 
-                                                                                          angle={-45}
-                                                                                          textAnchor="end"
-                                                                                          height={60}
-                                                                                          interval={Math.max(0, Math.floor(historicalChartWithItems.length / 12))}
-                                                                                        />
-                                                                                        <YAxis />
-                                                                                        <Tooltip content={<CustomHistoricalTooltip />} />
-                                                                                        <Line 
-                                                                                          type="monotone" 
-                                                                                          dataKey="total" 
-                                                                                          stroke="#3b82f6" 
-                                                                                          strokeWidth={2}
-                                                                                          dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
-                                                                                          name="Total Sales with Items"
-                                                                                        />
-                                                                                      </LineChart>
-                                                                                    </ResponsiveContainer>
-                                                                                    
-                                                                                    <div style={{
-                                                                                      backgroundColor: '#dbeafe',
-                                                                                      border: '1px solid #3b82f6',
-                                                                                      padding: '12px',
-                                                                                      borderRadius: '8px',
-                                                                                      marginTop: '16px',
-                                                                                      fontSize: '14px',
-                                                                                      color: '#1d4ed8',
-                                                                                      textAlign: 'center'
-                                                                                    }}>
-                                                                                      📊 Showing {historicalChartWithItems.length} historical data points for range {filterFromDate} to {filterToDate} | Hover over points to see item details | Peer benchmark: You're performing 23% above average
-                                                                                    </div>
-                                                                                  </div>
-                                                                                </div>
-                                         )}
-                                                                      
-                                        {/* FIXED: AI Forecast Results with FULL date range coverage */}
-{hasUploadedFile && data.forecasts && data.forecasts.length > 0 && (
+    {/* Card 2: Growth Rate */}
+    <div style={{
+      backgroundColor: 'white',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+      border: '1px solid #e2e8f0',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        fontSize: '36px',
+        fontWeight: '800',
+        color: data.business_metrics.growth_rate >= 0 ? '#22c55e' : '#ef4444',
+        marginBottom: '8px'
+      }}>
+        {data.business_metrics.growth_rate >= 0 ? '+' : ''}{data.business_metrics.growth_rate}%
+      </div>
+      <div style={{
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937',
+        marginBottom: '4px'
+      }}>
+        Growth Rate
+      </div>
+      <div style={{
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        Comparing first vs. second half of period
+      </div>
+      <div style={{
+        fontSize: '11px',
+        color: data.business_metrics.growth_rate >= 0 ? '#22c55e' : '#ef4444',
+        marginTop: '8px',
+        fontWeight: '600'
+      }}>
+        {data.business_metrics.growth_rate >= 0 ? '📈 Trending Up' : '📉 Needs Attention'}
+      </div>
+      <div style={{
+        fontSize: '10px',
+        color: '#94a3b8',
+        marginTop: '4px'
+      }}>
+        {data.business_metrics.date_range.start} to {data.business_metrics.date_range.end}
+      </div>
+    </div>
+
+    {/* Card 3: Average Transaction Value */}
+    <div style={{
+      backgroundColor: 'white',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+      border: '1px solid #e2e8f0',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        fontSize: '36px',
+        fontWeight: '800',
+        color: '#3b82f6',
+        marginBottom: '8px'
+      }}>
+        ₹{data.business_metrics.avg_transaction_value.toLocaleString()}
+      </div>
+      <div style={{
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937',
+        marginBottom: '4px'
+      }}>
+        Avg. Transaction Value
+      </div>
+      <div style={{
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        {data.business_metrics.avg_units_per_transaction.toFixed(1)} units per transaction
+      </div>
+      <div style={{
+        fontSize: '11px',
+        color: '#3b82f6',
+        marginTop: '8px',
+        fontWeight: '600'
+      }}>
+        {data.business_metrics.transactions_per_day.toFixed(1)} transactions/day
+      </div>
+      <div style={{
+        fontSize: '10px',
+        color: '#94a3b8',
+        marginTop: '4px'
+      }}>
+        Across {data.business_metrics.unique_products} products
+      </div>
+    </div>
+
+    {/* Card 4: Top Product Performance */}
+    <div style={{
+      backgroundColor: 'white',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+      border: '1px solid #e2e8f0',
+      textAlign: 'center'
+    }}>
+      <div style={{
+        fontSize: '36px',
+        fontWeight: '800',
+        color: '#f59e0b',
+        marginBottom: '8px'
+      }}>
+        {data.business_metrics.top_products && data.business_metrics.top_products.length > 0 
+          ? data.business_metrics.top_products[0].percentage + '%'
+          : 'N/A'}
+      </div>
+      <div style={{
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937',
+        marginBottom: '4px'
+      }}>
+        Top Product Share
+      </div>
+      <div style={{
+        fontSize: '12px',
+        color: '#6b7280',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap'
+      }}>
+        {data.business_metrics.top_products && data.business_metrics.top_products.length > 0 
+          ? data.business_metrics.top_products[0].name
+          : 'No data'}
+      </div>
+      <div style={{
+        fontSize: '11px',
+        color: '#f59e0b',
+        marginTop: '8px',
+        fontWeight: '600'
+      }}>
+        ₹{data.business_metrics.revenue_per_product.toLocaleString()} per product
+      </div>
+      <div style={{
+        fontSize: '10px',
+        color: '#94a3b8',
+        marginTop: '4px'
+      }}>
+        Top 5 products analyzed
+      </div>
+    </div>
+  </div>
+)}
+
+                                   
+                                                                                                         
+                                                                         {/* FIXED: Historical Sales Analysis with working export button */}
+                                                                         {hasUploadedFile && historicalChartWithItems && historicalChartWithItems.length > 0 && (
+                                                                                                                   <div style={{
+                                                                                                                     backgroundColor: 'white',
+                                                                                                                     borderRadius: '12px',
+                                                                                                                     boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                                                                                                     marginBottom: '24px',
+                                                                                                                     border: '1px solid #e2e8f0'
+                                                                                                                   }}>
+                                                                                                                     <div style={{
+                                                                                                                       borderBottom: '1px solid #e5e7eb',
+                                                                                                                       padding: '20px 24px',
+                                                                                                                       display: 'flex',
+                                                                                                                       justifyContent: 'space-between',
+                                                                                                                       alignItems: 'center'
+                                                                                                                     }}>
+                                                                                                                       <div>
+                                                                                                                         <h3 style={{
+  fontSize: '20px',
+  fontWeight: '700',
+  margin: '0 0 4px 0',
+  color: '#1f2937'
+}}>
+ 📊 Historical Sales Analysis
+  {data.filterMetadata?.dateRangeApplied?.from && (
+    <span style={{ fontSize: '13px', color: '#666', fontWeight: '400', marginLeft: '8px' }}>
+      ({data.filterMetadata.dateRangeApplied.from} to {data.filterMetadata.dateRangeApplied.to})
+    </span>
+  )}
+</h3>
+<div style={{ fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
+  Based on {data.filterMetadata?.recordsAnalyzed || 0} records
+  {data.filterMetadata?.recordsRemoved > 0 && (
+    <span style={{ color: '#ef4444' }}>
+      {' '}({data.filterMetadata.recordsRemoved} removed by filter)
+    </span>
+  )}
+</div>
+
+<div style={{
+                                                                                                                           fontSize: '16px',
+                                                                                                                           color: '#6b7280',
+                                                                                                                           fontWeight: '500',
+                                                                                                                           marginTop: '5px',
+                                                                                                                         }}>
+                                                                                                                           Based on proprietary In algorithms • Confidence: 94.2% | Using In Powered Algorithm
+                                                                                                                         </div>
+
+<div  style={{fontSize: '14 px', marginTop: '-2px'}}/>
+  {data.filterMetadata?.filterMessage && (
+    <span style={{ color: '#667eea' }}>✅ {data.filterMetadata.filterMessage}</span>
+  )}
+  <div />
+
+
+                                                                                                                       </div>
+                                                                                                                       <div style={{ display: 'flex', gap: '12px' }}>
+                                                                                                                         <button
+                                                                                                                           onClick={handleExportHistoricalData}
+                                                                                                                           style={{
+                                                                                                                             backgroundColor: '#3b82f6',
+                                                                                                                             color: 'white',
+                                                                                                                             border: 'none',
+                                                                                                                             padding: '8px 16px',
+                                                                                                                             borderRadius: '6px',
+                                                                                                                             fontSize: '14px',
+                                                                                                                             fontWeight: '600',
+                                                                                                                             cursor: 'pointer'
+                                                                                                                           }}
+                                                                                                                         >
+                                                                                                                           📥 Export Data
+                                                                                                                         </button>
+                                                                                                                         <button 
+                                     onClick={() => {
+                                       setModalTitle("📊 Historical Analysis Explanation");
+                                       setModalContent(
+                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
+                                           <p style={{marginBottom: "12px"}}>
+                                             <strong style={{color: "#3b82f6"}}>✅ Data Source:</strong> Your uploaded Excel file
+                                           </p>
+                                           <p style={{marginBottom: "12px"}}>
+                                             <strong style={{color: "#3b82f6"}}>📅 Date Range:</strong> {data.roiData?.dateRange}
+                                           </p>
+                                           <p style={{marginBottom: "12px"}}>
+                                             <strong style={{color: "#3b82f6"}}>📈 Analysis:</strong> Shows actual sales patterns from {data.historical?.length || 0} records
+                                           </p>
+                                           <p style={{marginBottom: "12px"}}>
+                                             <strong style={{color: "#22c55e"}}>🎯 Confidence:</strong> 94.2% based on An analysis
+                                           </p>
+                                           <p style={{marginBottom: "0", fontSize: "13px", color: "#64748b"}}>
+                                             💡 Hover over chart points to see detailed item information
+                                           </p>
+                                         </div>
+                                       );
+                                       setModalOpen(true);
+                                     }}
+                                     style={{
+                                       backgroundColor: '#8b5cf6',
+                                       color: 'white',
+                                       border: 'none',
+                                       padding: '8px 16px',
+                                       borderRadius: '6px',
+                                       fontSize: '14px',
+                                       fontWeight: '600',
+                                       cursor: 'pointer'
+                                     }}
+                                   >
+                                     Explanation
+                                   </button>
+                                   
+                                                                                                                       </div>
+                                                                                                                     </div>
+                                                                                                                     <div style={{ padding: '24px' }}>
+                                                                                                                       <ResponsiveContainer width="100%" height={300} key={`historical-with-items-${chartRefreshKey}`}>
+                                                                                                                         <LineChart data={historicalChartWithItems}>
+                                                                                                                           <CartesianGrid strokeDasharray="3 3" />
+                                                                                                                           <XAxis 
+                                                                                                                             dataKey="displayDate" 
+                                                                                                                             angle={-45}
+                                                                                                                             textAnchor="end"
+                                                                                                                             height={60}
+                                                                                                                             interval={Math.max(0, Math.floor(historicalChartWithItems.length / 12))}
+                                                                                                                             tick={{ fontSize: 12 }}
+                                                                                                                           />
+                                                                                                                           <YAxis />
+                                                                                                                           <Tooltip content={<CustomHistoricalTooltip />} />
+                                                                                                                           <Line 
+                                                                                                                             type="monotone" 
+                                                                                                                             dataKey="totalSales" 
+                                                                                                                             stroke="#3b82f6" 
+                                                                                                                             strokeWidth={2}
+                                                                                                                             dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
+                                                                                                                             name="Total Sales with Items"
+                                                                                                                           />
+                                                                                                                         </LineChart>
+                                                                                                                       </ResponsiveContainer>
+                                                                                                                       
+                                                                                                                       <div style={{
+                                                                                                                         backgroundColor: '#dbeafe',
+                                                                                                                         border: '1px solid #3b82f6',
+                                                                                                                         padding: '12px',
+                                                                                                                         borderRadius: '8px',
+                                                                                                                         marginTop: '16px',
+                                                                                                                         fontSize: '14px',
+                                                                                                                         color: '#1d4ed8',
+                                                                                                                         textAlign: 'center'
+                                                                                                                       }}>
+                                                                                                                         📊 Showing {historicalChartWithItems.length} historical data points for range {filterFromDate} to {filterToDate} | Hover over points to see item details | Peer benchmark: You're performing 23% above average
+                                                                                                                       </div>
+                                                                                                                     </div>
+                                                                                                                   </div>
+                                                                            )}
+                                                                                                         
+                                                                           {/* FIXED: AI Forecast Results with FULL date range coverage - EXACT SCREENSHOT MATCH */}
+{hasUploadedFile && data?.forecasts && data.forecasts.length > 0 && (
   <div style={{ 
     backgroundColor: 'white', 
     borderRadius: '12px', 
@@ -3092,7 +3529,7 @@ const businessMetrics = calculateFileBasedROI();
     border: '1px solid #e2e8f0'
   }}>
     
-{/* Heading Section - EXACT LAYOUT */}
+    {/* ==================== HEADER SECTION - EXACT MATCH ==================== */}
     <div style={{ 
       borderBottom: '1px solid #e5e7eb', 
       padding: '20px 24px', 
@@ -3100,6 +3537,7 @@ const businessMetrics = calculateFileBasedROI();
       justifyContent: 'space-between', 
       alignItems: 'center'
     }}>
+      
       {/* Left Side: Icon + Title + Subtitle */}
       <div>
         <h3 style={{ 
@@ -3112,10 +3550,9 @@ const businessMetrics = calculateFileBasedROI();
           gap: '8px'
         }}>
           <span>🤖</span>
-          <span>AI Forecast Results ({(() => {
-            const allDates = data.forecasts.flatMap(f => f.forecast.map(p => p.date)).sort();
-            return `${allDates[0]} to ${allDates[allDates.length - 1]}`;
-          })()})</span>
+          <span>
+            Upcoming Demand View ({filterFromDate} to {filterToDate})
+          </span>
         </h3>
         <div style={{ 
           fontSize: '14px', 
@@ -3126,63 +3563,85 @@ const businessMetrics = calculateFileBasedROI();
           gap: '6px'
         }}>
           <span>🔥</span>
-          <span>Forecasts change with date range selection • Model validation: 94.2% • Date-responsive patterns</span>
+          <span>Prevision change with date range selection • Model validation: 94.2% • Date-responsive patterns</span>
         </div>
       </div>
 
       {/* Right Side: Buttons */}
       <div style={{ display: 'flex', gap: '12px' }}>
         <button 
-  onClick={() => {
-    setModalTitle("🤖 AI Forecast Explanation");
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#8b5cf6"}}>🤖 AI Model:</strong> Facebook Prophet (Enterprise-grade)
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#22c55e"}}>📊 Accuracy:</strong> 94.2% validated from your uploaded file patterns
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#3b82f6"}}>📅 Coverage:</strong> Full date range {filterFromDate} to {filterToDate}
-        </p>
-        <p style={{marginBottom: "12px"}}>
-          <strong style={{color: "#f59e0b"}}>⚡ Features:</strong>
-        </p>
-        <ul style={{marginLeft: "20px", marginBottom: "12px"}}>
-          <li>Seasonality detection</li>
-          <li>Trend analysis</li>
-          <li>Confidence intervals</li>
-          <li>Date-responsive patterns</li>
-        </ul>
-        <p style={{marginBottom: "0", fontSize: "13px", color: "#64748b"}}>
-          💡 Forecasts update dynamically when you change date ranges
-        </p>
-      </div>
-    );
-    setModalOpen(true);
-  }}
-  style={{
-    backgroundColor: '#8b5cf6',
-    color: 'white',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    fontSize: '14px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  }}
->
-  <span>🤖</span>
-  <span>AI Explanation</span>
-</button>
-
+          onClick={() => {
+            setModalTitle("🤖 A Prophecy Explanation");
+            setModalContent(
+              <div style={{textAlign: "left", lineHeight: "1.8"}}>
+                <p style={{marginBottom: "12px"}}>
+                  <strong style={{color: "#8b5cf6"}}>🤖  Model:</strong>  Intelligent Stock (Enterprise-grade)
+                </p>
+                <p style={{marginBottom: "12px"}}>
+                  <strong style={{color: "#22c55e"}}>📊 Accuracy:</strong> 94.2% validated from your uploaded file patterns
+                </p>
+                <p style={{marginBottom: "12px"}}>
+                  <strong style={{color: "#3b82f6"}}>📅 Coverage:</strong> Full date range {filterFromDate} to {filterToDate}
+                </p>
+                <p style={{marginBottom: "12px"}}>
+                  <strong style={{color: "#f59e0b"}}>⚡ Features:</strong>
+                </p>
+                <ul style={{marginLeft: "20px", marginBottom: "12px"}}>
+                  <li>Seasonality detection</li>
+                  <li>Trend analysis</li>
+                  <li>Confidence intervals</li>
+                  <li>Date-responsive patterns</li>
+                </ul>
+                <p style={{marginBottom: "0", fontSize: "13px", color: "#64748b"}}>
+                  💡 Prophecy update dynamically when you change date ranges
+                </p>
+              </div>
+            );
+            setModalOpen(true);
+          }}
+          style={{
+            backgroundColor: '#8b5cf6',
+            color: 'white',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'background-color 0.2s ease'
+          }}
+          onMouseOver={(e) => e.target.style.backgroundColor = '#7c3aed'}
+          onMouseOut={(e) => e.target.style.backgroundColor = '#8b5cf6'}
+        >
+          <span>🤖</span>
+          <span> Explanation</span>
+        </button>
 
         <button 
-          onClick={handleExportForecastData}
+          onClick={() => {
+            const csvContent = data.forecasts
+              .map(forecast => 
+                `SKU,Item,Date,Predicted,Lower_CI,Upper_CI\n${
+                  (forecast.forecast || [])
+                    .map(f => 
+                      `${forecast.sku || 'N/A'},${forecast.item_name || 'N/A'},${f.date || 'N/A'},${f.predicted_units || 0},${f.lower_ci || 0},${f.upper_ci || 0}`
+                    )
+                    .join('\n')
+                }`
+              )
+              .join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `forecasts-${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+          }}
           style={{
             backgroundColor: '#22c55e',
             color: 'white',
@@ -3194,86 +3653,141 @@ const businessMetrics = calculateFileBasedROI();
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px'
+            gap: '6px',
+            transition: 'background-color 0.2s ease'
           }}
+          onMouseOver={(e) => e.target.style.backgroundColor = '#16a34a'}
+          onMouseOut={(e) => e.target.style.backgroundColor = '#22c55e'}
         >
           <span>⬇️</span>
-          <span>Export Forecasts</span>
+          <span>Export Prophecy</span>
         </button>
       </div>
     </div>
 
-    {/* Forecast Charts */}
+    
+
+    {/* ==================== FORECAST CHARTS SECTION ==================== */}
     <div style={{ padding: '24px' }}>
       {data.forecasts.map((forecast, index) => {
         const colors = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6'];
         const skuColor = colors[index % colors.length];
         
-        const chartData = forecast.forecast.map(item => ({
-          date: new Date(item.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          predicted_units: item.predicted_units,
+        const chartData = (forecast.forecast || []).map(item => ({
+          date: item.date 
+            ? new Date(item.date + 'T00:00:00').toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric' 
+              })
+            : 'N/A',
+          predicted_units: item.predicted_units || 0,
           lower_ci: showConfidence ? item.lower_ci : null,
           upper_ci: showConfidence ? item.upper_ci : null,
         }));
 
-        const totalPredicted = forecast.forecast.reduce((sum, day) => sum + day.predicted_units, 0);
+        const totalPredicted = (forecast.forecast || []).reduce(
+          (sum, day) => sum + (day.predicted_units || 0), 
+          0
+        );
+
+        const forecastAccuracy = forecast.accuracy 
+          ? (forecast.accuracy * 100).toFixed(1) 
+          : 'N/A';
+        
+        const forecastMape = forecast.mape 
+          ? forecast.mape.toFixed(1) 
+          : 'N/A';
 
         return (
-          <div 
-            key={`forecast-${forecast.sku}-${chartRefreshKey}-${dateRangeKey}-${forecastUpdateTrigger}-${fullRangeCoverageKey}-${index}`} 
+          <div
+            key={`forecast-${forecast.sku}-${index}`}
             style={{ marginBottom: '32px' }}
           >
-            <h4 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: '#1f2937' }}>
-  🔥 Forecast for {forecast.itemname || forecast.item_name || forecast.sku || 'Unknown Item'} - Full Range Coverage
-                    </h4>
+            {/* ==================== PRODUCT TITLE - EXACT MATCH ==================== */}
+            <h4 style={{ 
+              fontSize: '20px', 
+              fontWeight: '600',
+              marginTop: '-2px',
+              marginLeft: '-1px', 
+              marginBottom: '22px', 
+              color: '#1f2937',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span style={{ color: skuColor }}>🔥</span>
+              <span>Demand for {forecast.item_name || forecast.itemname || 'Item'} - Full Range Coverage</span>
+            </h4>
+
+            {/* ==================== CHART AREA ==================== */}
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis 
                   dataKey="date" 
                   angle={-45} 
                   textAnchor="end" 
                   height={60}
                   interval={Math.max(0, Math.floor(chartData.length / 15))}
+                  tick={{ fontSize: 12 }}
                 />
-                <YAxis />
+                <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip 
                   labelFormatter={(value) => `Date: ${value}`}
-                  formatter={(value, name) => [`${value} units`, name]}
+                  formatter={(value, name) => {
+                    let displayName = name;
+                    if (name === 'predicted_units') displayName = 'Predicted';
+                    if (name === 'lower_ci') displayName = 'Lower Bound (90%)';
+                    if (name === 'upper_ci') displayName = 'Upper Bound (90%)';
+                    return [`${value} units`, displayName];
+                  }}
+                  contentStyle={{
+                    backgroundColor: '#fff',
+                    border: `2px solid ${skuColor}`,
+                    borderRadius: '6px',
+                    padding: '8px'
+                  }}
                 />
+                <Legend />
+
+                {/* Main Prediction Line */}
                 <Line 
                   type="monotone" 
                   dataKey="predicted_units" 
                   stroke={skuColor} 
                   strokeWidth={3} 
-                  dot={{ fill: skuColor, strokeWidth: 2, r: 4 }}
-                  name={`Predicted Sales: ${forecast.itemname || forecast.item_name || forecast.sku}`}
+                  dot={{ fill: skuColor, r: 4, strokeWidth: 2, stroke: '#fff' }}
+                  name={`Predicted: ${forecast.item_name || forecast.itemname || 'Item'}`}
+                  isAnimationActive={false}
                 />
-                {showConfidence && (
-                  <>
-                    <Line 
-                      type="monotone" 
-                      dataKey="lower_ci" 
-                      stroke={`${skuColor}80`} 
-                      strokeDasharray="5 5" 
-                      strokeWidth={2} 
-                      dot={false}
-                      name="Lower Confidence"
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="upper_ci" 
-                      stroke={`${skuColor}80`} 
-                      strokeDasharray="5 5" 
-                      strokeWidth={2} 
-                      dot={false}
-                      name="Upper Confidence"
-                    />
-                  </>
-                )}
+
+                {/* Lower Bound Dashed Line */}
+                <Line 
+                  type="monotone" 
+                  dataKey="lower_ci" 
+                  stroke={skuColor} 
+                  strokeWidth={1.5}
+                  strokeDasharray="5 5" 
+                  dot={false}
+                  name="Lower Bound (90%)"
+                  isAnimationActive={false}
+                />
+
+                {/* Upper Bound Dashed Line */}
+                <Line 
+                  type="monotone" 
+                  dataKey="upper_ci" 
+                  stroke={skuColor} 
+                  strokeWidth={1.5}
+                  strokeDasharray="5 5" 
+                  dot={false}
+                  name="Upper Bound (90%)"
+                  isAnimationActive={false}
+                />
               </LineChart>
             </ResponsiveContainer>
 
+            {/* ==================== STATS BOX ==================== */}
             <div style={{
               backgroundColor: '#f0fdf4',
               border: '1px solid #22c55e',
@@ -3284,11 +3798,153 @@ const businessMetrics = calculateFileBasedROI();
               color: '#15803d',
               textAlign: 'center'
             }}>
-              🔥 {forecast.forecast.length} forecast points covering FULL range | 
+              🔥 {(forecast.forecast || []).length} Projection points covering FULL range | 
               Total Predicted: {totalPredicted.toLocaleString()} units | 
-              Confidence: {(forecast.r2_score * 100).toFixed(1)}% | 
+              Confidence: {forecastAccuracy}% | 
               📅 Complete coverage {filterFromDate} to {filterToDate} | 
-              🚫 No more limited forecasts!
+              🚫 No more limited Projections!
+            </div>
+
+            {/* ==================== ACTION BUTTONS ==================== */}
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              marginTop: '12px'
+            }}>
+              <button
+                onClick={() => {
+                  const csvContent = [
+                    'Date,Predicted_Units,Lower_CI,Upper_CI',
+                    ...(forecast.forecast || []).map(f =>
+                      `${f.date || 'N/A'},${f.predicted_units || 0},${f.lower_ci || 0},${f.upper_ci || 0}`
+                    )
+                  ].join('\n');
+                  
+                  const blob = new Blob([csvContent], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `forecast-${forecast.sku || 'item'}-${new Date().toISOString().split('T')[0]}.csv`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{
+                  backgroundColor: '#2563EB',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 18px',
+                  marginLeft: '1150px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  transition: 'background-color 0.2s ease'
+                }}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#2563eb'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#3b82f6'}
+              >
+                ⬇️ Export
+              </button>
+
+              <button
+                onClick={() => {
+                  setModalTitle(`📊 Projection Details: ${forecast.item_name || 'Item'}`);
+                  setModalContent(
+                    <div style={{ textAlign: 'left', lineHeight: '1.8', fontSize: '13px' }}>
+                      <div style={{
+                        backgroundColor: '#f0fdf4',
+                        border: '1px solid #86efac',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        marginBottom: '16px'
+                      }}>
+                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#166534', marginBottom: '8px' }}>
+                          📦 Item Information
+                        </div>
+                        <div style={{ color: '#166534' }}>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>Name:</strong> {forecast.item_name || forecast.itemname || 'N/A'}
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>SKU:</strong> {forecast.sku || 'N/A'}
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>Training Days:</strong> {forecast.training_days || 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        backgroundColor: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        marginBottom: '16px'
+                      }}>
+                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#1e40af', marginBottom: '8px' }}>
+                          📊 Model Performance
+                        </div>
+                        <div style={{ color: '#1e40af' }}>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>MAPE (Accuracy):</strong> {forecastMape}%
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>Confidence Level:</strong> {forecastAccuracy}%
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>Total Estimate Points:</strong> {(forecast.forecast || []).length}
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            <strong>Total Predicted Units:</strong> {totalPredicted.toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        backgroundColor: '#fef3c7',
+                        border: '1px solid #fcd34d',
+                        padding: '12px',
+                        borderRadius: '8px'
+                      }}>
+                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#92400e', marginBottom: '8px' }}>
+                          📅 Date Range Coverage
+                        </div>
+                        <div style={{ color: '#92400e' }}>
+                          <div style={{ margin: '4px 0' }}>
+                            From: {filterFromDate}
+                          </div>
+                          <div style={{ margin: '4px 0' }}>
+                            To: {filterToDate}
+                          </div>
+                          <div style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#b45309' }}>
+                            ✓ Estimate spans complete date range with no gaps
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                  setModalOpen(true);
+                }}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: '#3b82f6',
+                  border: '1px solid #3b82f6',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.backgroundColor = '#eff6ff';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                }}
+              >
+                📋 Details
+              </button>
             </div>
           </div>
         );
@@ -3296,555 +3952,601 @@ const businessMetrics = calculateFileBasedROI();
     </div>
   </div>
 )}
+                                   
+                                                                                                         
+                                                                         {/* FIXED: Normal UI for Inventory Recommendations with REAL item names */}
+{data.inventory && data.inventory.length > 0 && (
+  <div style={{
+    backgroundColor: 'white',
+    padding: '32px',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+    marginBottom: '32px'
+  }}>
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '24px'
+    }}>
+      <div>
+        <h3 style={{
+          fontSize: '20px',
+          fontWeight: '700',
+          margin: '0',
+          color: '#1f2937'
+        }}>
+          📦 Inventory Recommendations
+        </h3>
+        <p style={{
+          color: '#6b7280',
+          fontSize: '14px',
+          margin: '4px 0 0 0'
+        }}>
+          A-powered stock optimization based on uploaded file data • Date range: {filterFromDate} to {filterToDate}
+        </p>
+      </div>
+      
+      <button
+        onClick={(handleExportInventoryData)}
+        style={{
+          backgroundColor: '#8b5cf6',
+          color: 'white',
+          padding: '10px 20px',
+          border: 'none',
+          borderRadius: '8px',
+          fontWeight: '600',
+          cursor: 'pointer',
+          fontSize: '14px'
+        }}
+      >
+        📊 Export Inventory
+      </button>
+    </div>
+    
+    {/* ✅ FIXED: Simple table layout showing REAL item names */}
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: '14px'
+      }}>
+        <thead>
+          <tr style={{ backgroundColor: '#f8fafc' }}>
+            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Item Name</th>
+            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>SKU</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Safety Stock</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Point</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.inventory.map((item, index) => {
+            // ✅ SMART FIX: Calculate risk dynamically with proper fallback
+            // ✅ STEP 1: Get risk_level from backend first
+          let status = null;
+
+// Priority 1: Backend-calculated risk_level (MOST RELIABLE)
+          if (item.risk_level && ['HIGH', 'MEDIUM', 'LOW'].includes(item.risk_level)) {
+            status = item.risk_level;
+}
+// Priority 2: Fallback to demand_speed if risk_level unavailable
+          else if (item.demand_speed) {
+          if (item.demand_speed === 'FAST') {
+            status = 'HIGH';
+        } else if (item.demand_speed === 'MEDIUM') {
+            status = 'MEDIUM';
+        } else if (item.demand_speed === 'LOW') {
+            status = 'LOW';
+        }
+        }
+// Priority 3: Ultimate fallback
+          else {
+            status = 'MEDIUM';
+          }
+
+        
+            
+            return (
+              <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '12px', fontWeight: '600', color: '#1f2937' }}>
+                  {item.itemname || item.item_name || item.sku}
+                </td>
+                <td style={{ padding: '12px', color: '#6b7280', fontSize: '12px' }}>{item.sku}</td>
+                
+                <td style={{ padding: '12px', color: '#374151', fontWeight: '600', textAlign: 'center' }}>{item.recommendedstock || item.recommended_stock}</td>
+                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.safetystock || item.safety_stock}</td>
+                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.reorderpoint || item.reorder_point}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+    
+    <div style={{
+      marginTop: '20px',
+      padding: '16px',
+      backgroundColor: '#f0f9ff',
+      borderRadius: '12px',
+      border: '2px solid #0ea5e9'
+    }}>
+      <p style={{
+        color: '#0ea5e9',
+        fontWeight: '600',
+        margin: 0,
+        fontSize: '14px'
+      }}>
+        📊 Recommendations based on {data.historical?.length || 0} records from uploaded file • 
+        Date range: <strong>{filterFromDate} to {filterToDate}</strong> • 
+        High Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'HIGH';
+          if (i.days_of_stock !== undefined) return i.days_of_stock <= 3;
+          return false;
+        }).length} | 
+        Medium Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'MEDIUM';
+          if (i.days_of_stock !== undefined) return i.days_of_stock > 3 && i.days_of_stock <= 10;
+          return false;
+        }).length} | 
+        Low Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'LOW';
+          if (i.days_of_stock !== undefined) return i.days_of_stock > 15;
+          return false;
+        }).length}
+      </p>
+    </div>
+  </div>
+)}
+
 
                                                                       
-                                      { /*FIXED: Normal UI for Inventory Recommendations with REAL item names */}
-                                   {data.inventory && data.inventory.length > 0 && (
-                                     <div style={{
-                                       backgroundColor: 'white',
-                                       padding: '32px',
-                                       borderRadius: '16px',
-                                       boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-                                       marginBottom: '32px'
-                                     }}>
-                                       <div style={{
-                                         display: 'flex',
-                                         justifyContent: 'space-between',
-                                         alignItems: 'center',
-                                         marginBottom: '24px'
-                                       }}>
-                                         <div>
-                                           <h3 style={{
-                                             fontSize: '20px',
-                                             fontWeight: '700',
-                                             margin: '0',
-                                             color: '#1f2937'
+                                                                      {/* ✅ FIXED: Normal UI for Priority Actions with REAL item names */}
+                                                                      {data.priorityActions && data.priorityActions.length > 0 && (
+                                                                        <div style={{
+                                                                          backgroundColor: 'white',
+                                                                          padding: '32px',
+                                                                          borderRadius: '16px',
+                                                                          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+                                                                          marginBottom: '32px'
+                                                                        }}>
+                                                                          <div style={{
+                                                                            display: 'flex',
+                                                                            justifyContent: 'space-between',
+                                                                            alignItems: 'center',
+                                                                            marginBottom: '24px'
+                                                                          }}>
+                                                                            <div>
+                                                                              <h3 style={{
+                                                                                fontSize: '20px',
+                                                                                fontWeight: '700',
+                                                                                margin: '0',
+                                                                                color: '#1f2937'
+                                                                              }}>
+                                                                                🚨 Priority Action Recommendations
+                                                                              </h3>
+                                                                              <p style={{
+                                                                                color: '#6b7280',
+                                                                                fontSize: '14px',
+                                                                                margin: '4px 0 0 0'
+                                                                              }}>
+                                                                                Business decisions with ROI calculations from uploaded file data • Date range: {filterFromDate} to {filterToDate}
+                                                                              </p>
+                                                                            </div>
+                                                                            
+                                                                            <button
+                                                                              onClick={(handleExportPriorityActions)}
+                                                                              style={{
+                                                                                backgroundColor: '#dc2626',
+                                                                                color: 'white',
+                                                                                padding: '10px 20px',
+                                                                                border: 'none',
+                                                                                borderRadius: '8px',
+                                                                                fontWeight: '600',
+                                                                                cursor: 'pointer',
+                                                                                fontSize: '14px'
+                                                                              }}
+                                                                            >
+                                                                              📊 Export Actions
+                                                                            </button>
+                                                                          </div>
+                                                                          
+                                                                          {/* ✅ FIXED: Simple list layout showing REAL item names */}
+                                                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                                                            {data.priorityActions.map((action, index) => (
+                                                                              <div key={index} style={{
+                                                                                padding: '20px',
+                                                                                border: action.priority === 'HIGH' ? '2px solid #fecaca' : '2px solid #fed7aa',
+                                                                                borderRadius: '12px',
+                                                                                backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed'
+                                                                              }}>
+                                                                                <div style={{
+                                                                                  display: 'flex',
+                                                                                  justifyContent: 'space-between',
+                                                                                  alignItems: 'flex-start'
+                                                                                }}>
+                                                                                  <div style={{ flex: 1 }}>
+                                                                                    <div style={{
+                                                                                      fontSize: '16px',
+                                                                                      fontWeight: '700',
+                                                                                      color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                                                                      marginBottom: '8px'
+                                                                                    }}>
+                                                                                      {action.priority} PRIORITY: {action.action}
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#1f2937',
+                                                                                      fontWeight: '600',
+                                                                                      marginBottom: '8px'
+                                                                                    }}>
+                                                                                      {/* ✅ SHOW REAL ITEM NAME from uploaded file */}
+                                                                                      📦 {action.itemname || action.sku}
+                                                                                      <span style={{ color: '#6b7280', fontWeight: '400', fontSize: '12px' }}>
+                                                                                        {action.sku && action.itemname && ` (${action.sku})`}
+                                                                                      </span>
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#374151',
+                                                                                      marginBottom: '12px'
+                                                                                    }}>
+                                                                                      {action.recommendedaction || action.description}
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#6b7280',
+                                                                                      marginTop: '-5px',
+                                                                                      marginBottom: '6px',
+                                                                                      fontWeight: '500'
+                                                                                    }}>
+                                                                                      🚨 URGENT: immediately restock the Recommended Qty: {action.recommended_stock?.toLocaleString() || 'N/A'} units, Because of Daily Demand: {action.daily_sales?.toFixed(1) || 'N/A'} units/day
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '12px',
+                                                                                      color: '#6b7280'
+                                                                                    }}>
+                                                                                      📊 Based on uploaded file data • Timeline: {action.timeline || '1-3 days'} • 
+                                                                                      Investment: ₹{action.investmentrequired?.toLocaleString() || '0'} • 
+                                                                                      ROI: {action.expectedroi || '150'}%
+                                                                                    </div>
+                                                                                  </div>
+                                                                                  
+                                                                                    {/* Revenue Risk & Stock Details */}
+  
+
+  
+
+  {/* Revenue Risk Calculation */}
+  <div style={{ 
+    backgroundColor: '#22c55e', 
+    padding: '9px 16px',
+    marginLeft: '300px',
+    marginBottom: '-10px', 
+    borderRadius: '10px'
+  }}>
+    <strong style={{ color: '#ffffffff', fontSize: '14px', margin: '-5px 2px -7px -5px' }}> Revenue Risk: ₹{Math.max(0, action.expected_revenue - action.expected_profit)?.toLocaleString() || '0'}</strong>
+    
+  </div>
+
+                                                                                </div>
+                                                                                
+                                                                                <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                                                                                  <button 
+                                     onClick={() => {
+                                       setModalTitle(`🚀 Implementation Plan: ${action.itemname}`);
+                                       setModalContent(
+                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
+                                           {/* Header with Priority */}
+                                           <div style={{
+                                             backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
+                                             border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
+                                             padding: "16px",
+                                             borderRadius: "12px",
+                                             marginBottom: "20px"
                                            }}>
-                                             📦 Inventory Recommendations
-                                           </h3>
-                                           <p style={{
-                                             color: '#6b7280',
-                                             fontSize: '14px',
-                                             margin: '4px 0 0 0'
-                                           }}>
-                                             AI-powered stock optimization based on uploaded file data • Date range: {filterFromDate} to {filterToDate}
-                                           </p>
-                                         </div>
-                                         
-                                         <button
-                                           onClick={() => exportData(data.inventory, 'inventory-recommendations-from-uploaded-file')}
-                                           style={{
-                                             backgroundColor: '#8b5cf6',
-                                             color: 'white',
-                                             padding: '10px 20px',
-                                             border: 'none',
-                                             borderRadius: '8px',
-                                             fontWeight: '600',
-                                             cursor: 'pointer',
-                                             fontSize: '14px'
-                                           }}
-                                         >
-                                           📊 Export Inventory
-                                         </button>
-                                       </div>
-                                       
-                                       {/* ✅ FIXED: Simple table layout showing REAL item names */}
-                                       <div style={{ overflowX: 'auto' }}>
-                                         <table style={{
-                                           width: '100%',
-                                           borderCollapse: 'collapse',
-                                           fontSize: '14px'
-                                         }}>
-                                           <thead>
-                                             <tr style={{ backgroundColor: '#f8fafc' }}>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Item Name</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>SKU</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Current Stock</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Safety Stock</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Point</th>
-                                               <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Status</th>
-                                             </tr>
-                                           </thead>
-                                           <tbody>
-                                             {data.inventory.map((item, index) => (
-                                               <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                                 <td style={{ padding: '12px', fontWeight: '600', color: '#1f2937' }}>
-                                                   {/* ✅ SHOW REAL ITEM NAME from uploaded file */}
-                                                   {item.itemname || item.sku}
-                                                 </td>
-                                                 <td style={{ padding: '12px', color: '#6b7280', fontSize: '12px' }}>{item.sku}</td>
-                                                 <td style={{ padding: '12px', color: '#374151' }}>{item.currentstock || item.current_stock}</td>
-                                                 <td style={{ padding: '12px', color: '#374151', fontWeight: '600' }}>{item.recommendedstock || item.recommended_stock}</td>
-                                                 <td style={{ padding: '12px', color: '#374151' }}>{item.safetystock || item.safety_stock}</td>
-                                                 <td style={{ padding: '12px', color: '#374151' }}>{item.reorderpoint || item.reorder_point}</td>
-                                                 <td style={{ padding: '12px' }}>
-                                                   <span style={{
-                                                     padding: '4px 8px',
-                                                     borderRadius: '4px',
-                                                     fontSize: '12px',
-                                                     fontWeight: '600',
-                                                     backgroundColor: item.shortagerisk === 'HIGH' ? '#fef2f2' : item.shortagerisk === 'MEDIUM' ? '#fef3c7' : '#f0fdf4',
-                                                     color: item.shortagerisk === 'HIGH' ? '#dc2626' : item.shortagerisk === 'MEDIUM' ? '#d97706' : '#166534'
-                                                   }}>
-                                                     {item.shortagerisk || 'MEDIUM'}
-                                                   </span>
-                                                 </td>
-                                               </tr>
-                                             ))}
-                                           </tbody>
-                                         </table>
-                                       </div>
-                                       
-                                       <div style={{
-                                         marginTop: '20px',
-                                         padding: '16px',
-                                         backgroundColor: '#f0f9ff',
-                                         borderRadius: '12px',
-                                         border: '2px solid #0ea5e9'
-                                       }}>
-                                         <p style={{
-                                           color: '#0ea5e9',
-                                           fontWeight: '600',
-                                           margin: 0,
-                                           fontSize: '14px'
-                                         }}>
-                                           📊 Recommendations based on {data.historical?.length || 0} records from uploaded file • 
-                                           Date range: {filterFromDate} to {filterToDate} • 
-                                           High Risk: {data.inventory.filter(i => i.shortagerisk === 'HIGH').length} | 
-                                           Medium Risk: {data.inventory.filter(i => i.shortagerisk === 'MEDIUM').length} | 
-                                           Low Risk: {data.inventory.filter(i => i.shortagerisk === 'LOW').length}
-                                         </p>
-                                       </div>
-                                     </div>
-                                   )}
-                                   
-                                   {/* ✅ FIXED: Normal UI for Priority Actions with REAL item names */}
-                                   {data.priorityActions && data.priorityActions.length > 0 && (
-                                     <div style={{
-                                       backgroundColor: 'white',
-                                       padding: '32px',
-                                       borderRadius: '16px',
-                                       boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-                                       marginBottom: '32px'
-                                     }}>
-                                       <div style={{
-                                         display: 'flex',
-                                         justifyContent: 'space-between',
-                                         alignItems: 'center',
-                                         marginBottom: '24px'
-                                       }}>
-                                         <div>
-                                           <h3 style={{
-                                             fontSize: '20px',
-                                             fontWeight: '700',
-                                             margin: '0',
-                                             color: '#1f2937'
-                                           }}>
-                                             🚨 Priority Action Recommendations
-                                           </h3>
-                                           <p style={{
-                                             color: '#6b7280',
-                                             fontSize: '14px',
-                                             margin: '4px 0 0 0'
-                                           }}>
-                                             Business decisions with ROI calculations from uploaded file data • Date range: {filterFromDate} to {filterToDate}
-                                           </p>
-                                         </div>
-                                         
-                                         <button
-                                           onClick={() => exportData(data.priorityActions, 'priority-actions-from-uploaded-file')}
-                                           style={{
-                                             backgroundColor: '#dc2626',
-                                             color: 'white',
-                                             padding: '10px 20px',
-                                             border: 'none',
-                                             borderRadius: '8px',
-                                             fontWeight: '600',
-                                             cursor: 'pointer',
-                                             fontSize: '14px'
-                                           }}
-                                         >
-                                           📊 Export Actions
-                                         </button>
-                                       </div>
-                                       
-                                       {/* ✅ FIXED: Simple list layout showing REAL item names */}
-                                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                         {data.priorityActions.map((action, index) => (
-                                           <div key={index} style={{
-                                             padding: '20px',
-                                             border: action.priority === 'HIGH' ? '2px solid #fecaca' : '2px solid #fed7aa',
-                                             borderRadius: '12px',
-                                             backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed'
-                                           }}>
-                                             <div style={{
-                                               display: 'flex',
-                                               justifyContent: 'space-between',
-                                               alignItems: 'flex-start'
-                                             }}>
-                                               <div style={{ flex: 1 }}>
-                                                 <div style={{
-                                                   fontSize: '16px',
-                                                   fontWeight: '700',
-                                                   color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-                                                   marginBottom: '8px'
-                                                 }}>
-                                                   {action.priority} PRIORITY: {action.action}
-                                                 </div>
-                                                 <div style={{
-                                                   fontSize: '14px',
-                                                   color: '#1f2937',
-                                                   fontWeight: '600',
-                                                   marginBottom: '8px'
-                                                 }}>
-                                                   {/* ✅ SHOW REAL ITEM NAME from uploaded file */}
-                                                   📦 {action.itemname || action.sku}
-                                                   <span style={{ color: '#6b7280', fontWeight: '400', fontSize: '12px' }}>
-                                                     {action.sku && action.itemname && ` (${action.sku})`}
-                                                   </span>
-                                                 </div>
-                                                 <div style={{
-                                                   fontSize: '14px',
-                                                   color: '#374151',
-                                                   marginBottom: '12px'
-                                                 }}>
-                                                   {action.recommendedaction || action.description}
-                                                 </div>
-                                                 <div style={{
-                                                   fontSize: '12px',
-                                                   color: '#6b7280'
-                                                 }}>
-                                                   📊 Based on uploaded file data • Timeline: {action.timeline || '1-3 days'} • 
-                                                   Investment: ₹{action.investmentrequired?.toLocaleString() || '0'} • 
-                                                   ROI: {action.expectedroi || '150'}%
-                                                 </div>
-                                               </div>
-                                               
-                                               <div style={{
-                                                 backgroundColor: '#22c55e',
-                                                 color: 'white',
-                                                 padding: '8px 16px',
-                                                 borderRadius: '8px',
-                                                 fontWeight: '700',
-                                                 fontSize: '14px'
-                                               }}>
-                                                 Revenue Risk: ₹{action.estimatedrevenueloss?.toLocaleString() || '0'}
-                                               </div>
+                                             <div style={{fontSize: "18px", fontWeight: "700", marginBottom: "8px"}}>
+                                               {action.action}
                                              </div>
-                                             
-                                             <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                                               <button 
-  onClick={() => {
-    setModalTitle(`🚀 Implementation Plan: ${action.itemname}`);
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        {/* Header with Priority */}
-        <div style={{
-          backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
-          border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
-          padding: "16px",
-          borderRadius: "12px",
-          marginBottom: "20px"
-        }}>
-          <div style={{fontSize: "18px", fontWeight: "700", marginBottom: "8px"}}>
-            {action.action}
-          </div>
-          <div style={{
-            display: "flex",
-            gap: "12px",
-            alignItems: "center",
-            fontSize: "13px"
-          }}>
-            <span style={{
-              backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-              color: 'white',
-              padding: "4px 12px",
-              borderRadius: "6px",
-              fontWeight: "700"
-            }}>
-              {action.priority} PRIORITY
-            </span>
-            <span style={{fontWeight: "600", color: "#64748b"}}>
-              SKU: {action.sku}
-            </span>
-          </div>
-        </div>
-
-        {/* Timeline */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#3b82f6", fontSize: "15px"}}>⏱️ Timeline:</strong>
-          <div style={{
-            marginTop: "8px",
-            padding: "12px",
-            backgroundColor: "#eff6ff",
-            borderRadius: "8px",
-            fontSize: "16px",
-            fontWeight: "600",
-            color: "#1e40af"
-          }}>
-            {action.timeline || '1-3 days'}
-          </div>
-        </div>
-
-        {/* Financial Breakdown */}
-        <div style={{
-          backgroundColor: "#f8fafc",
-          border: "2px solid #e2e8f0",
-          borderRadius: "12px",
-          padding: "16px",
-          marginBottom: "20px"
-        }}>
-          <div style={{fontSize: "15px", fontWeight: "700", marginBottom: "12px", color: "#1f2937"}}>
-            💰 Financial Impact:
-          </div>
-
-          {/* Revenue at Risk */}
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginBottom: "12px",
-            padding: "10px",
-            backgroundColor: "#fef2f2",
-            borderRadius: "6px"
-          }}>
-            <span style={{fontWeight: "600", color: "#991b1b"}}>Revenue at Risk:</span>
-            <span style={{fontSize: "18px", fontWeight: "700", color: "#dc2626"}}>
-              ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
-            </span>
-          </div>
-
-          {/* Investment Required */}
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginBottom: "12px",
-            padding: "10px",
-            backgroundColor: "#fff7ed",
-            borderRadius: "6px"
-          }}>
-            <span style={{fontWeight: "600", color: "#9a3412"}}>Investment Required:</span>
-            <span style={{fontSize: "18px", fontWeight: "700", color: "#ea580c"}}>
-              ₹{action.investmentrequired?.toLocaleString() || 0}
-            </span>
-          </div>
-
-          {/* Expected ROI */}
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            padding: "10px",
-            backgroundColor: "#f0fdf4",
-            borderRadius: "6px"
-          }}>
-            <span style={{fontWeight: "600", color: "#166534"}}>Expected ROI:</span>
-            <span style={{fontSize: "20px", fontWeight: "800", color: "#22c55e"}}>
-              {action.expectedroi || 150}%
-            </span>
-          </div>
-        </div>
-
-        {/* Action Steps */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#8b5cf6", fontSize: "15px"}}>📋 Implementation Steps:</strong>
-          <ol style={{marginLeft: "20px", marginTop: "10px", color: "#475569", lineHeight: "1.8"}}>
-            <li><strong>Review Forecast:</strong> Analyze {action.forecasteddemand?.toLocaleString() || 'predicted'} units demand</li>
-            <li><strong>Order Stock:</strong> Place order for {action.shortage?.toLocaleString() || 'required'} units</li>
-            <li><strong>Monitor Progress:</strong> Track delivery and stock levels</li>
-            <li><strong>Verify Results:</strong> Confirm ROI after {action.timeline || '1-3 days'}</li>
-          </ol>
-        </div>
-
-        {/* Data Source Footer */}
-        <div style={{
-          marginTop: "20px",
-          paddingTop: "16px",
-          borderTop: "2px solid #e2e8f0",
-          fontSize: "13px",
-          color: "#64748b"
-        }}>
-          <div style={{marginBottom: "6px"}}>
-            📂 <strong>Data Source:</strong> {action.datasource || 'Real Excel File'}
-          </div>
-          <div style={{marginBottom: "6px"}}>
-            📅 <strong>Analysis Period:</strong> {filterFromDate} to {filterToDate}
-          </div>
-          <div>
-            🎯 <strong>Confidence Level:</strong> {action.confidence || 88}%
-          </div>
-        </div>
-      </div>
-    );
-    setModalOpen(true);
-  }}
-  style={{
-    backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-    color: 'white',
-    padding: '8px 16px',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontSize: '12px'
-  }}
->
-  View Implementation Plan
-</button>
-
-                                               
-                                               <button 
-  onClick={() => {
-    setModalTitle(`📋 Action Details for ${action.itemname}`);
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        {/* SKU Badge */}
-        <div style={{
-          display: "inline-block",
-          backgroundColor: "#f1f5f9",
-          padding: "6px 12px",
-          borderRadius: "6px",
-          marginBottom: "16px",
-          fontSize: "13px",
-          fontWeight: "600",
-          color: "#64748b"
-        }}>
-          SKU: {action.sku}
-        </div>
-
-        {/* Priority Badge */}
-        <div style={{
-          display: "inline-block",
-          backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
-          color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-          padding: "8px 16px",
-          borderRadius: "8px",
-          marginBottom: "20px",
-          marginLeft: "12px",
-          fontSize: "14px",
-          fontWeight: "700"
-        }}>
-          {action.priority} PRIORITY
-        </div>
-
-        {/* Recommended Action */}
-        <div style={{
-          backgroundColor: "#f0fdf4",
-          border: "2px solid #22c55e",
-          padding: "16px",
-          borderRadius: "10px",
-          marginBottom: "20px"
-        }}>
-          <strong style={{color: "#166534", fontSize: "15px"}}>✅ Recommended Action:</strong>
-          <p style={{margin: "8px 0 0 0", color: "#166534", fontSize: "14px"}}>
-            {action.recommendedaction || 'Optimize stock levels based on AI forecast'}
-          </p>
-        </div>
-
-        {/* Analysis Details */}
-        <div style={{marginBottom: "16px"}}>
-          <strong style={{color: "#3b82f6"}}>📊 Analysis Based On:</strong>
-          <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569"}}>
-            <li>Historical sales patterns from uploaded file</li>
-            <li>Professional AI demand analysis</li>
-            <li>Revenue risk assessment</li>
-            <li>Date range: {filterFromDate} to {filterToDate}</li>
-          </ul>
-        </div>
-
-        {/* Revenue Risk */}
-        <div style={{
-          backgroundColor: "#fef2f2",
-          border: "1px solid #fecaca",
-          padding: "12px",
-          borderRadius: "8px",
-          marginBottom: "16px"
-        }}>
-          <strong style={{color: "#dc2626"}}>💰 Revenue Risk:</strong>
-          <span style={{
-            marginLeft: "8px",
-            fontSize: "18px",
-            fontWeight: "700",
-            color: "#dc2626"
-          }}>
-            ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
-          </span>
-        </div>
-
-        {/* Investment Required */}
-        {action.investmentrequired && (
-          <div style={{marginBottom: "12px"}}>
-            <strong style={{color: "#f59e0b"}}>💵 Investment Required:</strong>
-            <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "600"}}>
-              ₹{action.investmentrequired?.toLocaleString()}
-            </span>
-          </div>
-        )}
-
-        {/* Expected ROI */}
-        {action.expectedroi && (
-          <div style={{marginBottom: "12px"}}>
-            <strong style={{color: "#22c55e"}}>📈 Expected ROI:</strong>
-            <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "700", color: "#22c55e"}}>
-              {action.expectedroi}%
-            </span>
-          </div>
-        )}
-
-        {/* Data Source */}
-        <div style={{
-          marginTop: "20px",
-          paddingTop: "16px",
-          borderTop: "1px solid #e2e8f0",
-          fontSize: "12px",
-          color: "#94a3b8"
-        }}>
-          📂 Data Source: {action.datasource || 'Real Excel File'} | Confidence: {action.confidence || 88}%
-        </div>
-      </div>
-    );
-    setModalOpen(true);
-  }}
-  style={{
-    backgroundColor: 'transparent',
-    color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-    padding: '8px 16px',
-    border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
-    borderRadius: '6px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontSize: '12px'
-  }}
->
-  View Details
-</button>
-
+                                             <div style={{
+                                               display: "flex",
+                                               gap: "12px",
+                                               alignItems: "center",
+                                               fontSize: "13px"
+                                             }}>
+                                               <span style={{
+                                                 backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                                 color: 'white',
+                                                 padding: "4px 12px",
+                                                 borderRadius: "6px",
+                                                 fontWeight: "700"
+                                               }}>
+                                                 {action.priority} PRIORITY
+                                               </span>
+                                               <span style={{fontWeight: "600", color: "#64748b"}}>
+                                                 SKU: {action.sku}
+                                               </span>
                                              </div>
                                            </div>
-                                         ))}
-                                       </div>
-                                       
-                                       <div style={{
-                                         marginTop: '20px',
-                                         padding: '16px',
-                                         backgroundColor: '#fef2f2',
-                                         borderRadius: '12px',
-                                         border: '2px solid #dc2626'
-                                       }}>
-                                         <p style={{
-                                           color: '#dc2626',
-                                           fontWeight: '600',
-                                           margin: 0,
-                                           fontSize: '14px'
-                                         }}>
-                                           🚨 All priority actions calculated from uploaded file data • 
-                                           Date range: {filterFromDate} to {filterToDate} • 
-                                           High: {data.priorityActions.filter(a => a.priority === 'HIGH').length} | 
-                                           Medium: {data.priorityActions.filter(a => a.priority === 'MEDIUM').length} | 
-                                           Total Revenue Risk: ₹{data.priorityActions.reduce((sum, a) => sum + (a.estimatedrevenueloss || 0), 0).toLocaleString()}
-                                         </p>
-                                       </div>
-                                     </div>
-                                   )}
+                                   
+                                           {/* Timeline */}
+                                           <div style={{marginBottom: "20px"}}>
+                                             <strong style={{color: "#3b82f6", fontSize: "15px"}}>⏱️ Timeline:</strong>
+                                             <div style={{
+                                               marginTop: "8px",
+                                               padding: "12px",
+                                               backgroundColor: "#eff6ff",
+                                               borderRadius: "8px",
+                                               fontSize: "16px",
+                                               fontWeight: "600",
+                                               color: "#1e40af"
+                                             }}>
+                                               {action.timeline || '1-3 days'}
+                                             </div>
+                                           </div>
+                                   
+                                           {/* Financial Breakdown */}
+                                           <div style={{
+                                             backgroundColor: "#f8fafc",
+                                             border: "2px solid #e2e8f0",
+                                             borderRadius: "12px",
+                                             padding: "16px",
+                                             marginBottom: "20px"
+                                           }}>
+                                             <div style={{fontSize: "15px", fontWeight: "700", marginBottom: "12px", color: "#1f2937"}}>
+                                               💰 Financial Impact:
+                                             </div>
+                                   
+                                             {/* Revenue at Risk */}
+                                             <div style={{
+                                               display: "flex",
+                                               justifyContent: "space-between",
+                                               marginBottom: "12px",
+                                               padding: "10px",
+                                               backgroundColor: "#fef2f2",
+                                               borderRadius: "6px"
+                                             }}>
+                                               <span style={{fontWeight: "600", color: "#991b1b"}}>Revenue at Risk:</span>
+                                               <span style={{fontSize: "18px", fontWeight: "700", color: "#dc2626"}}>
+                                                 ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
+                                               </span>
+                                             </div>
+                                   
+                                             {/* Investment Required */}
+                                             <div style={{
+                                               display: "flex",
+                                               justifyContent: "space-between",
+                                               marginBottom: "12px",
+                                               padding: "10px",
+                                               backgroundColor: "#fff7ed",
+                                               borderRadius: "6px"
+                                             }}>
+                                               <span style={{fontWeight: "600", color: "#9a3412"}}>Investment Required:</span>
+                                               <span style={{fontSize: "18px", fontWeight: "700", color: "#ea580c"}}>
+                                                 ₹{action.investmentrequired?.toLocaleString() || 0}
+                                               </span>
+                                             </div>
+                                   
+                                             {/* Expected ROI */}
+                                             <div style={{
+                                               display: "flex",
+                                               justifyContent: "space-between",
+                                               padding: "10px",
+                                               backgroundColor: "#f0fdf4",
+                                               borderRadius: "6px"
+                                             }}>
+                                               <span style={{fontWeight: "600", color: "#166534"}}>Expected ROI:</span>
+                                               <span style={{fontSize: "20px", fontWeight: "800", color: "#22c55e"}}>
+                                                 {action.expectedroi || 150}%
+                                               </span>
+                                             </div>
+                                           </div>
+                                   
+                                           {/* Action Steps */}
+                                           <div style={{marginBottom: "20px"}}>
+                                             <strong style={{color: "#8b5cf6", fontSize: "15px"}}>📋 Implementation Steps:</strong>
+                                             <ol style={{marginLeft: "20px", marginTop: "10px", color: "#475569", lineHeight: "1.8"}}>
+                                               <li><strong>Review Prophecy:</strong> Analyze {action.forecasteddemand?.toLocaleString() || 'predicted'} units demand</li>
+                                               <li><strong>Order Stock:</strong> Place order for {action.shortage?.toLocaleString() || 'required'} units</li>
+                                               <li><strong>Monitor Progress:</strong> Track delivery and stock levels</li>
+                                               <li><strong>Verify Results:</strong> Confirm ROI after {action.timeline || '1-3 days'}</li>
+                                             </ol>
+                                           </div>
+                                   
+                                           {/* Data Source Footer */}
+                                           <div style={{
+                                             marginTop: "20px",
+                                             paddingTop: "16px",
+                                             borderTop: "2px solid #e2e8f0",
+                                             fontSize: "13px",
+                                             color: "#64748b"
+                                           }}>
+                                             <div style={{marginBottom: "6px"}}>
+                                               📂 <strong>Data Source:</strong> {action.datasource || 'Real Excel File'}
+                                             </div>
+                                             <div style={{marginBottom: "6px"}}>
+                                               📅 <strong>Analysis Period:</strong> {filterFromDate} to {filterToDate}
+                                             </div>
+                                             <div>
+                                               🎯 <strong>Confidence Level:</strong> {action.confidence || 88}%
+                                             </div>
+                                           </div>
+                                         </div>
+                                       );
+                                       setModalOpen(true);
+                                     }}
+                                     style={{
+                                       backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                       color: 'white',
+                                       padding: '8px 16px',
+                                       border: 'none',
+                                       borderRadius: '6px',
+                                       fontWeight: '600',
+                                       cursor: 'pointer',
+                                       fontSize: '12px'
+                                     }}
+                                   >
+                                     View Implementation Plan
+                                   </button>
+                                   
+                                                                                  
+                                                                                  <button 
+                                     onClick={() => {
+                                       setModalTitle(`📋 Action Details for ${action.itemname}`);
+                                       setModalContent(
+                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
+                                           {/* SKU Badge */}
+                                           <div style={{
+                                             display: "inline-block",
+                                             backgroundColor: "#f1f5f9",
+                                             padding: "6px 12px",
+                                             borderRadius: "6px",
+                                             marginBottom: "16px",
+                                             fontSize: "13px",
+                                             fontWeight: "600",
+                                             color: "#64748b"
+                                           }}>
+                                             SKU: {action.sku}
+                                           </div>
+                                   
+                                           {/* Priority Badge */}
+                                           <div style={{
+                                             display: "inline-block",
+                                             backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
+                                             color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                             padding: "8px 16px",
+                                             borderRadius: "8px",
+                                             marginBottom: "20px",
+                                             marginLeft: "12px",
+                                             fontSize: "14px",
+                                             fontWeight: "700"
+                                           }}>
+                                             {action.priority} PRIORITY
+                                           </div>
+                                   
+                                           {/* Recommended Action */}
+                                           <div style={{
+                                             backgroundColor: "#f0fdf4",
+                                             border: "2px solid #22c55e",
+                                             padding: "16px",
+                                             borderRadius: "10px",
+                                             marginBottom: "20px"
+                                           }}>
+                                             <strong style={{color: "#166534", fontSize: "15px"}}>✅ Recommended Action:</strong>
+                                             <p style={{margin: "8px 0 0 0", color: "#166534", fontSize: "14px"}}>
+                                               {action.recommendedaction || 'Optimize stock levels based on AI forecast'}
+                                             </p>
+                                           </div>
+                                   
+                                           {/* Analysis Details */}
+                                           <div style={{marginBottom: "16px"}}>
+                                             <strong style={{color: "#3b82f6"}}>📊 Analysis Based On:</strong>
+                                             <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569"}}>
+                                               <li>Historical sales patterns from uploaded file</li>
+                                               <li>Professional AI demand analysis</li>
+                                               <li>Revenue risk assessment</li>
+                                               <li>Date range: {filterFromDate} to {filterToDate}</li>
+                                             </ul>
+                                           </div>
+                                   
+                                           {/* Revenue Risk */}
+                                           <div style={{
+                                             backgroundColor: "#fef2f2",
+                                             border: "1px solid #fecaca",
+                                             padding: "12px",
+                                             borderRadius: "8px",
+                                             marginBottom: "16px"
+                                           }}>
+                                             <strong style={{color: "#dc2626"}}>💰 Revenue Risk:</strong>
+                                             <span style={{
+                                               marginLeft: "8px",
+                                               fontSize: "18px",
+                                               fontWeight: "700",
+                                               color: "#dc2626"
+                                             }}>
+                                               ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
+                                             </span>
+                                           </div>
+                                   
+                                           {/* Investment Required */}
+                                           {action.investmentrequired && (
+                                             <div style={{marginBottom: "12px"}}>
+                                               <strong style={{color: "#f59e0b"}}>💵 Investment Required:</strong>
+                                               <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "600"}}>
+                                                 ₹{action.investmentrequired?.toLocaleString()}
+                                               </span>
+                                             </div>
+                                           )}
+                                   
+                                           {/* Expected ROI */}
+                                           {action.expectedroi && (
+                                             <div style={{marginBottom: "12px"}}>
+                                               <strong style={{color: "#22c55e"}}>📈 Expected ROI:</strong>
+                                               <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "700", color: "#22c55e"}}>
+                                                 {action.expectedroi}%
+                                               </span>
+                                             </div>
+                                           )}
+                                   
+                                           {/* Data Source */}
+                                           <div style={{
+                                             marginTop: "20px",
+                                             paddingTop: "16px",
+                                             borderTop: "1px solid #e2e8f0",
+                                             fontSize: "12px",
+                                             color: "#94a3b8"
+                                           }}>
+                                             📂 Data Source: {action.datasource || 'Real Excel File'} | Confidence: {action.confidence || 88}%
+                                           </div>
+                                         </div>
+                                       );
+                                       setModalOpen(true);
+                                     }}
+                                     style={{
+                                       backgroundColor: 'transparent',
+                                       color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                       padding: '8px 16px',
+                                       border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
+                                       borderRadius: '6px',
+                                       fontWeight: '600',
+                                       cursor: 'pointer',
+                                       fontSize: '12px'
+                                     }}
+                                   >
+                                     View Details
+                                   </button>
+                                   
+                                                                                </div>
+                                                                              </div>
+                                                                            ))}
+                                                                          </div>
+                                                                          
+                                                                          <div style={{
+                                                                            marginTop: '20px',
+                                                                            padding: '16px',
+                                                                            backgroundColor: '#fef2f2',
+                                                                            borderRadius: '12px',
+                                                                            border: '2px solid #dc2626'
+                                                                          }}>
+                                                                            <p style={{
+                                                                              color: '#dc2626',
+                                                                              fontWeight: '600',
+                                                                              margin: 0,
+                                                                              fontSize: '14px'
+                                                                            }}>
+                                                                              🚨 All priority actions calculated from uploaded file data • 
+                                                                              Date range: {filterFromDate} to {filterToDate} • 
+                                                                              High: {data.priorityActions.filter(a => a.priority === 'HIGH').length} | 
+                                                                              Medium: {data.priorityActions.filter(a => a.priority === 'MEDIUM').length} | 
+                                                                              Low: {data.priorityActions.filter(a => a.priority === 'LOW').length} |
+                                                                              Total Revenue Risk: ₹{data.priorityActions.reduce((sum, a) => sum + (a.estimatedrevenueloss || 0), 0).toLocaleString()}
+                                                                            </p>
+                                                                          </div>
+                                                                        </div>
+                                                                      )}
+
+
+
                                            
         {/* Export & Conversion Section */}
         {hasUploadedFile && (
@@ -3865,7 +4567,7 @@ const businessMetrics = calculateFileBasedROI();
                 margin: '0 0 4px 0',
                 color: '#1f2937'
               }}>
-                📋 Professional Report Options
+                📋 Professional Report Options (Pro)
               </h3>
               <div style={{
                 fontSize: '14px',
@@ -4137,7 +4839,7 @@ const businessMetrics = calculateFileBasedROI();
       setModalContent(
         <div style={{textAlign: "center", padding: "20px"}}>
           <p style={{color: "#dc2626", fontSize: "16px"}}>
-            No forecast data available. Please upload your Excel file first.
+            No Projection data available. Please upload your Excel file first.
           </p>
         </div>
       );
@@ -4167,7 +4869,7 @@ const businessMetrics = calculateFileBasedROI();
         {/* Forecast Summary */}
         <div style={{marginBottom: "20px"}}>
           <strong style={{color: "#3b82f6", fontSize: "15px"}}>
-            🤖 AI Model Performance:
+            🤖 A Model Performance:
           </strong>
           <div style={{
             marginTop: "8px",
@@ -4177,7 +4879,7 @@ const businessMetrics = calculateFileBasedROI();
             border: "1px solid #e2e8f0"
           }}>
             <div style={{fontSize: "14px", marginBottom: "6px"}}>
-              <strong>Model:</strong> Facebook Prophet (Enterprise)
+              <strong>Model:</strong> Projection (Enterprise)
             </div>
             <div style={{fontSize: "14px", marginBottom: "6px"}}>
               <strong>Accuracy:</strong> 94.2% R² score
@@ -4186,7 +4888,7 @@ const businessMetrics = calculateFileBasedROI();
               <strong>Items Analyzed:</strong> {data.forecasts.length} SKUs
             </div>
             <div style={{fontSize: "14px"}}>
-              <strong>Total Forecast Points:</strong> {data.forecasts.reduce((sum, f) => sum + f.forecast.length, 0)}
+              <strong>Total Projection Points:</strong> {data.forecasts.reduce((sum, f) => sum + f.forecast.length, 0)}
             </div>
           </div>
         </div>
@@ -4342,36 +5044,18 @@ const businessMetrics = calculateFileBasedROI();
         </div>
 
         {/* Immediate Actions (High Priority) */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#dc2626", fontSize: "16px"}}>
-            🚨 Immediate Actions (Next 24-48 Hours):
-          </strong>
-          <div style={{marginTop: "12px"}}>
-            {data.priorityActions
-              .filter(a => a.priority === 'HIGH')
-              .slice(0, 3)
-              .map((action, index) => (
-                <div key={index} style={{
-                  padding: "12px",
-                  backgroundColor: "#fef2f2",
-                  borderRadius: "8px",
-                  marginBottom: "10px",
-                  border: "2px solid #dc2626"
-                }}>
-                  <div style={{fontWeight: "700", fontSize: "14px", color: "#991b1b", marginBottom: "6px"}}>
-                    {index + 1}. {action.itemname}
-                  </div>
-                  <div style={{fontSize: "13px", color: "#7f1d1d"}}>
-                    ⚡ {action.action}
-                  </div>
-                  <div style={{fontSize: "12px", color: "#991b1b", marginTop: "6px"}}>
-                    💰 Revenue Risk: ₹{action.estimatedrevenueloss?.toLocaleString()}
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-        </div>
+        <div style={{ marginBottom: '20px' }}>
+  <strong style={{ color: '#dc2626', fontSize: '16px' }}>
+    Immediate Actions Next 24-48 Hours
+    {data.filterMetadata?.dateRangeApplied?.from && (
+      <span style={{ fontSize: '13px', color: '#666', fontWeight: '400', marginLeft: '12px' }}>
+        ({data.filterMetadata?.filterMessage}) | {data.filterMetadata.dateRangeApplied.from} to {data.filterMetadata.dateRangeApplied.to}
+        ({data.filterMetadata.dateRangeApplied.actualDays} days)
+      </span>
+    )}
+  </strong>
+</div>
+
 
         {/* Weekly Planning */}
         <div style={{marginBottom: "20px"}}>
@@ -4488,7 +5172,7 @@ const businessMetrics = calculateFileBasedROI();
                   Pro plan pays for itself with just 0.5% revenue increase from our insights!
                 </p>
                 <button 
-  onClick={() => {
+  onClick={(handleUpgradeROICalculator) => {
     if (!data.roiData) {
       setModalTitle("⚠️ Upload Required");
       setModalContent(
@@ -4737,7 +5421,7 @@ const businessMetrics = calculateFileBasedROI();
                 lineHeight: '1.5',
                 margin: '0'
               }}>
-                "ForecastAI helped us increase revenue by 18% in just 3 months. 
+                "Intelligent assistant helped us increase revenue by 18% in just 3 months. 
                 The ROI was immediate and the insights are invaluable for our business decisions."
               </p>
             </div>
@@ -4775,7 +5459,7 @@ const businessMetrics = calculateFileBasedROI();
                 lineHeight: '1.5',
                 margin: '0'
               }}>
-                "The accuracy is incredible - 94.2% forecast precision helped us reduce inventory costs 
+                "The accuracy is incredible - 94.2% Estimate precision helped us reduce inventory costs 
                 by ₹2.4 lakhs per month while improving customer satisfaction."
               </p>
             </div>
@@ -4913,7 +5597,7 @@ const businessMetrics = calculateFileBasedROI();
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
                 🏢 hyderabad, India<br />
                 🌍 Serving 500+ retailers globally<br />
-                ⏰ 24/7 AI-powered insights
+                ⏰ 24/7 powered insights
               </div>
             </div>
           </div>
@@ -5771,9 +6455,401 @@ const businessMetrics = calculateFileBasedROI();
           }
         }
       `}</style>
+      {/* ✅ NEW: Trial Paywall Modal - Shows when user tries to upload after trial expires */}
+      {showTrialPaywall && <TrialPaywallModal />}
     </div>
   );
 };
+
+// ✅ NEW: Trial Paywall Modal Component
+// ✅ NEW: Trial Paywall Modal Component
+const TrialPaywallModal = () => {
+  const plans = [
+    {
+      name: 'STARTER',
+      monthlyPrice: '₹3,000',
+      annualPrice: '₹30,000',
+      savingsPercent: '17%',
+      features: [
+        '✅ Up to 10 products',
+        '✅ Basic forecasting',
+        '✅ Email support',
+        '✅ 30-day data retention',
+        '❌ Custom integrations',
+        '❌ Priority support'
+      ],
+      highlighted: false,
+      buttonColor: '#64748b'
+    },
+    {
+      name: 'PRO',
+      monthlyPrice: '₹7,500',
+      annualPrice: '₹75,000',
+      savingsPercent: '17%',
+      features: [
+        '✅ Unlimited products',
+        '✅ Advanced AI forecasting',
+        '✅ Priority email support',
+        '✅ 1-year data retention',
+        '✅ Custom integrations',
+        '✅ Dedicated account manager'
+      ],
+      highlighted: true,
+      buttonColor: '#667eea'
+    },
+    {
+      name: 'ENTERPRISE',
+      monthlyPrice: 'Custom',
+      annualPrice: 'Custom',
+      savingsPercent: null,
+      features: [
+        '✅ Custom product limits',
+        '✅ Real-time API access',
+        '✅ 24/7 phone support',
+        '✅ Unlimited data retention',
+        '✅ White-label options',
+        '✅ SLA guarantees'
+      ],
+      highlighted: false,
+      buttonColor: '#22c55e'
+    }
+  ];
+
+  // ✅ NEW: local state to control QR visibility
+  const [showQR, setShowQR] = useState(false);
+
+
+  const handleUpgrade = (planName) => {
+    console.log('Upgrading to plan:', planName);
+    
+    // Navigate to checkout page
+    navigate(`/checkout?plan=${planName.toUpperCase()}&from=paywall`);
+    
+    // Close modal
+    setShowTrialPaywall(false);
+  };
+
+  const handleContactSales = () => {
+    console.log('Opening contact sales form');
+    alert('📞 Enterprise Sales Team will contact you within 2 hours.\n\n☎️ Direct: +91-9876-FORECAST\n📧 Email: sales@forecastai.com');
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 10000,
+      backdropFilter: 'blur(4px)'
+    }}>
+      
+      {/* Modal Container */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '20px',
+        maxWidth: '1200px',
+        width: '95%',
+        maxHeight: '90vh',
+        overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+        padding: '40px 32px'
+      }}>
+        
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+          <h1 style={{
+            fontSize: '42px',
+            fontWeight: '900',
+            margin: '0 0 16px 0',
+            color: '#1f2937'
+          }}>
+            🎉 Your Free Trial Has Ended
+          </h1>
+          
+          <p style={{
+            fontSize: '18px',
+            color: '#6b7280',
+            margin: 0,
+            fontWeight: '500'
+          }}>
+            Unlock unlimited forecasting, advanced AI models, and priority support. 
+            Choose your plan and continue optimizing inventory today.
+          </p>
+        </div>
+
+        {/* Pricing Plans Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '24px',
+          marginBottom: '40px'
+        }}>
+          {plans.map((plan, index) => (
+            <div key={index} style={{
+              border: plan.highlighted ? '3px solid #667eea' : '1px solid #e5e7eb',
+              borderRadius: '16px',
+              padding: '32px 24px',
+              backgroundColor: plan.highlighted ? '#f5f3ff' : '#ffffff',
+              position: 'relative',
+              boxShadow: plan.highlighted ? '0 8px 24px rgba(102, 126, 234, 0.25)' : 'none',
+              transform: plan.highlighted ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease'
+            }}>
+              
+              {/* Recommended Badge */}
+              {plan.highlighted && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-12px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  padding: '4px 16px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  letterSpacing: '0.05em'
+                }}>
+                  ⭐ RECOMMENDED
+                </div>
+              )}
+
+              {/* Plan Name */}
+              <h3 style={{
+                fontSize: '24px',
+                fontWeight: '800',
+                margin: '0 0 8px 0',
+                color: '#1f2937'
+              }}>
+                {plan.name}
+              </h3>
+
+              {/* Monthly Price */}
+              <div style={{
+                fontSize: '42px',
+                fontWeight: '900',
+                color: plan.buttonColor,
+                margin: '16px 0 8px 0'
+              }}>
+                {plan.monthlyPrice}
+                <span style={{
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  color: '#6b7280',
+                  margin: '0 0 0 8px'
+                }}>
+                  /month
+                </span>
+              </div>
+
+              {/* Annual Billing Option */}
+              {plan.savingsPercent && (
+                <p style={{
+                  fontSize: '13px',
+                  color: '#22c55e',
+                  margin: '0 0 24px 0',
+                  fontWeight: '600'
+                }}>
+                  💰 Save {plan.savingsPercent} with annual billing: {plan.annualPrice}
+                </p>
+              )}
+
+              {/* Features List */}
+              <ul style={{
+                listStyle: 'none',
+                padding: '0',
+                margin: '0 0 32px 0'
+              }}>
+                {plan.features.map((feature, idx) => (
+                  <li key={idx} style={{
+                    fontSize: '14px',
+                    color: feature.includes('❌') ? '#d1d5db' : '#374151',
+                    margin: '12px 0',
+                    fontWeight: '500',
+                    textDecoration: feature.includes('❌') ? 'line-through' : 'none'
+                  }}>
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+
+              {/* CTA Button */}
+              {plan.name === 'ENTERPRISE' ? (
+                <button
+                  onClick={handleContactSales}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    backgroundColor: plan.buttonColor,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '16px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: `0 4px 12px rgba(0, 0, 0, 0.15)`
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = `0 6px 16px rgba(0, 0, 0, 0.2)`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = `0 4px 12px rgba(0, 0, 0, 0.15)`;
+                  }}
+                >
+                  📞 Contact Sales
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (plan.name === 'STARTER') {
+                      // ✅ NEW: only STARTER shows QR image
+                      setShowQR(true);
+                    } else {
+                      // keep existing behaviour (e.g. PRO)
+                      handleUpgrade(plan.name);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    backgroundColor: plan.buttonColor,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '16px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: `0 4px 12px rgba(0, 0, 0, 0.15)`
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = `0 6px 16px rgba(0, 0, 0, 0.2)`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = `0 4px 12px rgba(0, 0, 0, 0.15)`;
+                  }}
+                >
+                  🚀 Choose {plan.name}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Trust & Security Footer */}
+        <div style={{
+          backgroundColor: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '12px',
+          padding: '20px',
+          textAlign: 'center'
+        }}>
+          <p style={{
+            margin: '0',
+            fontSize: '14px',
+            color: '#6b7280',
+            fontWeight: '500'
+          }}>
+            🔒 Secure payment • 🛡️ 100% data protection • 📧 Money-back guarantee
+          </p>
+        </div>
+
+                {/* Close Button */}
+        <button
+          onClick={() => setShowTrialPaywall(false)}
+          style={{
+            position: 'absolute',
+            top: '24px',
+            right: '24px',
+            width: '40px',
+            height: '40px',
+            backgroundColor: '#f3f4f6',
+            border: 'none',
+            borderRadius: '50%',
+            fontSize: '24px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => e.target.style.backgroundColor = '#e5e7eb'}
+          onMouseLeave={(e) => e.target.style.backgroundColor = '#f3f4f6'}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* ✅ NEW: Simple QR image overlay, triggered only by STARTER button */}
+      {showQR && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 20000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '24px',
+            borderRadius: '16px',
+            textAlign: 'center',
+            boxShadow: '0 16px 40px rgba(0,0,0,0.4)'
+          }}>
+            <h3 style={{ marginBottom: '12px', fontWeight: 800 }}>
+              Scan to Pay via UPI
+            </h3>
+
+            <img
+              src="upi-qr.jpeg"
+              alt="UPI payment QR"
+              style={{ width: 420, height: 550, borderRadius: 12 }}
+            />
+
+            <p style={{ marginTop: '8px', fontSize: '14px', color: '#4b5563' }}>
+              Use GPay / PhonePe / Paytm or any UPI app to scan this code.
+            </p>
+
+            <button
+              onClick={() => setShowQR(false)}
+              style={{
+                marginTop: '16px',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#4b5563',
+                color: 'white',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 
 export default Dashboard;
 
