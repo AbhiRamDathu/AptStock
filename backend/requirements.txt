@@ -1,9 +1,7 @@
-fastapi
-uvicorn[standard]
-pydantic
-pymongo
-pandas
-xlsxwriter
-openpyxl
-python-multipart
-fastapi[all]
+Flask==3.0.0
+flask-cors==4.0.0
+pymongo==4.6.1
+prophet==1.1.5
+pandas==2.1.4
+python-dotenv==1.0.0
+gunicorn==21.2.0
