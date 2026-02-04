@@ -10,18 +10,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ========== MONGODB CONFIGURATION ==========
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "forecastai_pro")
+
 
 # MongoDB Collections
 USERS_COLLECTION = "users"
 PASSWORD_RESET_TOKENS_COLLECTION = "password_reset_tokens"
 
 # ========== JWT AUTHENTICATION ==========
-JWT_SECRET = os.getenv("JWT_SECRET", "your-super-secret-key-CHANGE-THIS-IN-PRODUCTION-min-32-chars")
+JWT_SECRET = os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET", "your-super-secret-key-CHANGE-THIS-IN-PRODUCTION-min-32-chars")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 REFRESH_TOKEN_EXPIRATION_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRATION_DAYS", "7"))
+
 
 # ========== EMAIL CONFIGURATION (for password reset) ==========
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
@@ -47,7 +49,8 @@ print("="*60 + "\n")
 
 # Warn if using defaults
 if JWT_SECRET == "your-super-secret-key-CHANGE-THIS-IN-PRODUCTION-min-32-chars":
-    print("⚠️  WARNING: Using default JWT_SECRET! Change this in production!")
+    print("⚠️  WARNING: Using default JWT_SECRET! Set JWT_SECRET_KEY env var in production!")
+
 
 if not SMTP_EMAIL or not SMTP_PASSWORD:
     print("⚠️  WARNING: SMTP not configured. Password reset emails will fail!")
