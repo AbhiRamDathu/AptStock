@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 import pathlib
 from fastapi import APIRouter, Depends
 from app.services.database_service import DatabaseService
-
-from datetime import datetime, timedelta
-
 from app.routes import forecast_routes, auth_routes
 
 
@@ -43,7 +40,7 @@ app = FastAPI(
 # ========== CORS MIDDLEWARE ==========
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite default port
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "https://aptstock.onrender.com", "https://*.onrender.com"],  # Vite default port
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,10 +49,7 @@ app.add_middleware(
 # ========== ROUTES ==========
 app.include_router(auth_routes.router, prefix="/auth", tags=["authentication"])
 app.include_router(forecast_routes.router, prefix="/api/forecast", tags=["forecasting"])
-app.include_router(forecast_routes.router)
 
-
-# ========== ROOT ENDPOINTS ==========
 
 # ========== STARTUP/SHUTDOWN ==========
 @app.on_event("startup")
@@ -77,7 +71,21 @@ def root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "ForecastAI Pro"}
+    """Public health check for monitoring services like UptimeRobot"""
+    try:
+        # Quick ping to verify MongoDB connection
+        mongo_client.admin.command('ping')
+        db_status = "connected"
+    except Exception as e:
+        db_status = "disconnected"
+        logger.error(f"MongoDB health check failed: {e}")
+    
+    return {
+        "status": "healthy",
+        "service": "ForecastAI Pro",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": db_status
+    }
 
 @admin_router.get("/health")
 async def system_health():
