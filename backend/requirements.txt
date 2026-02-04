@@ -1,6 +1,20 @@
-Flask==3.0.3
-flask-cors==5.0.0
-pymongo>=4.3.0,<5.0.0
-pandas>=2.0.0,<3.0.0
+fastapi
+uvicorn[standard]
+pydantic
+pymongo
+pandas
+xlsxwriter
+openpyxl
+python-multipart
+fastapi[all]
+# Time-series forecasting
+prophet==1.1.5
+
+# ML and metrics
+scikit-learn==1.4.0
+statsmodels==0.14.1
+
+# JWT Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
-gunicorn==22.0.0
