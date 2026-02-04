@@ -69,27 +69,12 @@ def root():
         "version": "2.0.0"
     }
 
-@app.get("/health")
-def health_check():
-    """Public health check for monitoring services like UptimeRobot"""
-    try:
-        # Quick ping to verify MongoDB connection
-        mongo_client.admin.command('ping')
-        db_status = "connected"
-    except Exception as e:
-        db_status = "disconnected"
-        logger.error(f"MongoDB health check failed: {e}")
-    
-    return {
-        "status": "healthy",
-        "service": "ForecastAI Pro",
-        "timestamp": datetime.utcnow().isoformat(),
-        "database": db_status
-    }
+from fastapi import Request
 
-@app.get("/health")
-def health_check():
-    """Public health check for monitoring services like UptimeRobot"""
+# ✅ FIXED: Support both GET and HEAD methods
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health_check(request: Request):
+    """Public health check for monitoring services - supports GET and HEAD"""
     try:
         mongo_client.admin.command('ping')
         db_status = "connected"
@@ -97,32 +82,40 @@ def health_check():
         db_status = "disconnected"
         logger.error(f"MongoDB health check failed: {e}")
     
+    # For HEAD requests, return empty body (only headers matter)
+    if request.method == "HEAD":
+        return {}
+    
+    # For GET requests, return full response
     return {
         "status": "healthy",
         "service": "ForecastAI Pro",
         "timestamp": datetime.utcnow().isoformat(),
-        "database": db_status
+        "database": db_status,
+        "version": "2.0.0"
     }
 
-# ✅ ADD THIS NEW ENDPOINT
-@app.get("/api/health")
-def api_health_check():
-    """Health check at /api/health for Render's default health check path"""
+# Optional: Also fix /api/health if you added it
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+def api_health_check(request: Request):
+    """API health check - supports GET and HEAD methods"""
     try:
         mongo_client.admin.command('ping')
         db_status = "connected"
     except Exception as e:
         db_status = "disconnected"
-        logger.error(f"MongoDB health check failed: {e}")
+    
+    if request.method == "HEAD":
+        return {}
     
     return {
         "status": "healthy",
         "service": "ForecastAI Pro",
         "timestamp": datetime.utcnow().isoformat(),
         "database": db_status,
+        "version": "2.0.0",
         "path": "/api/health"
     }
-
 
 @admin_router.get("/health")
 async def system_health():
