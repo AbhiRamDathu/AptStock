@@ -1181,24 +1181,6 @@ const handleLoadSampleData = async () => {
   });
   setLoading(true);
 
-  // ✅ FIX: Extract date range from backend response
-if (response.summary && response.summary.dateRange) {
-  console.log("📅 Setting dates from backend:", response.summary.dateRange);
-  setFilterFromDate(response.summary.dateRange.start);
-  setFilterToDate(response.summary.dateRange.end);
-} else if (response.historical && response.historical.length > 0) {
-  // Fallback: Extract from historical data
-  const dates = response.historical.map(h => new Date(h.date));
-  const minDate = new Date(Math.min(...dates));
-  const maxDate = new Date(Math.max(...dates));
-  const startDate = minDate.toISOString().split('T');
-  const endDate = maxDate.toISOString().split('T');
-  console.log("📅 Extracted dates from historical:", { startDate, endDate });
-  setFilterFromDate(startDate);
-  setFilterToDate(endDate);
-}
-
-
   try {
     const response = await forecastAPI.loadSampleData();
 

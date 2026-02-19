@@ -98,37 +98,18 @@ class AuthService:
 
     @staticmethod
     def login_user(email: str, password: str, stay_logged_in: bool = False) -> Dict:
-        """
-        Authenticate user and generate tokens
-    
-        Args:
-            email: User email
-            password: User password
-            stay_logged_in: If True, generate 7-day refresh token
-        
-        Returns:
-            {
-                "success": True,
-                "access_token": JWT token (15 min),
-                "refresh_token": Refresh token (7 days, if stay_logged_in=True),
-                "token_type": "bearer",
-                "user": User data
-            }
-        """
+        """Authenticate user"""
         user = DatabaseService.get_user_by_email(email)
-   
+       
         if not user or not AuthService.verify_password(password, user.get("password_hash", "")):
             return {"success": False, "error": "Invalid email or password"}
 
-    # ✅ Generate access token (15 minutes)
+
         access_token = AuthService.create_access_token(user["id"], email)
-    
-    # ✅ Initialize response
         response = {
             "success": True,
             "access_token": access_token,
             "token_type": "bearer",
-            "refresh_token": None,  # ✅ NEW: Always include this key
             "user": {
                 "id": user["id"],
                 "email": user["email"],
@@ -137,13 +118,11 @@ class AuthService:
             }
         }
 
-    # ✅ Generate refresh token (7 days) ONLY if stay_logged_in=True
+
         if stay_logged_in:
             refresh_token = AuthService.create_refresh_token(user["id"])
             response["refresh_token"] = refresh_token
-            print(f"✅ 7-day refresh token generated for {email}")
-        else:
-            print(f"ℹ️  No refresh token (stay_logged_in=False)")
+
 
         return response
 

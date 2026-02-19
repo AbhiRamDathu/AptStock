@@ -11,6 +11,7 @@ import Dashboard from './Dashboard-smart-alerts.jsx';
 
 function App() {
   return (
+    <AuthProvider>
         <div className="App">
           <Routes>
             {/* Public routes */}
@@ -36,6 +37,7 @@ function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
+        </AuthProvider>
   );
 }
 

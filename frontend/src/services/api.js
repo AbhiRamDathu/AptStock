@@ -2,7 +2,7 @@ import axios from 'axios';
 
 
 // API Service - All backend communication goes through here
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
+const API_BASE_URL = 'http://localhost:8000';
 
 
 // Helper to get auth token
@@ -142,20 +142,11 @@ export const forecastAPI = {
 loadSampleData: async () => {
   try {
     const token = localStorage.getItem('token');
-    console.log("🔄 Loading sample data from backend...");
-    
-    // ✅ FIX: Build query parameters (backend expects them in URL)
-    const params = new URLSearchParams();
-    // Leave empty to load full sample data range
-    
-    const queryString = params.toString();
-    const url = `${API_BASE_URL}/api/forecast/upload-and-process-sample${queryString ? `?${queryString}` : ''}`;
-    
-    console.log("📤 Sample data URL:", url);
+    console.log("Loading sample data from backend...");
     
     const response = await axios.post(
-      url,
-      {},  // Empty body is OK - backend gets params from query string
+      `${API_BASE_URL}/api/forecast/upload-and-process-sample`,
+      {},
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -164,19 +155,14 @@ loadSampleData: async () => {
       }
     );
     
-    console.log("✅ Sample data loaded:", response.data);
+    console.log("Sample data loaded:", response.data);
     return response.data;
     
   } catch (error) {
-    console.error("❌ Sample data error:", error);
-    if (error.response) {
-      console.error("❌ Error response:", error.response.data);
-      console.error("❌ Error status:", error.response.status);
-    }
+    console.error("Sample data error:", error);
     throw error;
   }
 },
-
 
 getSampleCSVContent: async () => {
   try {

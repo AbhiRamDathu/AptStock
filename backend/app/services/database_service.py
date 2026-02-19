@@ -22,43 +22,22 @@ class DatabaseService:
     
     @staticmethod
     def create_user(user_data: dict) -> Optional[str]:
-        """Create new user in database WITH 14-DAY FREE TRIAL"""
+        """Create new user in database"""
         try:
-            # Calculate trial end date (14 days from now)
-            trial_start = datetime.utcnow()
-            trial_end = trial_start + timedelta(days=14)
-        
             user_doc = {
                 "email": user_data["email"],
                 "password_hash": user_data["password_hash"],
                 "full_name": user_data["full_name"],
                 "company_name": user_data["company_name"],
-            
-                # ✅ NEW: TRIAL FIELDS
-                "trial_status": "ACTIVE",  # ACTIVE | EXPIRED | PAID
-                "trial_start_date": trial_start,
-                "trial_end_date": trial_end,
-                "free_uploads_remaining": 10,
-                "max_free_uploads": 10,
-            
-                # ✅ NEW: SUBSCRIPTION FIELDS
-                "subscription_tier": "FREE",  # FREE | STARTER | PRO | ENTERPRISE
-                "subscription_end_date": None,  # Null until they pay
-            
-                # Keep existing fields
                 "created_at": datetime.utcnow(),
                 "is_verified": False,
                 "refresh_tokens": []
             }
-        
             result = users_collection.insert_one(user_doc)
-            print(f"[✅ TRIAL] User {user_data['email']} created with 14-day trial (ends {trial_end.strftime('%Y-%m-%d')})")
             return str(result.inserted_id)
-        
         except DuplicateKeyError:
-            print(f"[⚠️] Email already registered: {user_data['email']}")
             return None
-    
+
     @staticmethod
     def get_user_by_email(email: str) -> Optional[dict]:
         """Fetch user by email"""
@@ -79,66 +58,6 @@ class DatabaseService:
             return user
         except:
             return None
-
-    @staticmethod
-    def update_trial_status(email: str, status: str) -> bool:
-        """Update user's trial status"""
-        try:
-            result = users_collection.update_one(
-                {"email": email},
-                {"$set": {"trial_status": status}}
-            )
-            print(f"[✅] Trial status updated for {email}: {status}")
-            return True
-        except Exception as e:
-            print(f"[❌] Error updating trial status: {e}")
-            return False
-
-    @staticmethod
-    def update_subscription(email: str, tier: str, end_date: datetime = None) -> bool:
-        """Update user's subscription tier"""
-        try:
-            update_data = {"subscription_tier": tier}
-            if end_date:
-                update_data["subscription_end_date"] = end_date
-        
-            result = users_collection.update_one(
-                {"email": email},
-                {"$set": update_data}
-            )
-            print(f"[✅] Subscription updated for {email}: {tier}")
-            return True
-        except Exception as e:
-            print(f"[❌] Error updating subscription: {e}")
-            return False
-
-    @staticmethod
-    def get_trial_info(user_id: str) -> dict:
-        """Get user's trial and subscription info"""
-        try:
-            user = users_collection.find_one({"_id": ObjectId(user_id)})
-            if not user:
-                return {}
-        
-            trial_info = {
-                "trial_status": user.get("trial_status", "ACTIVE"),
-                "trial_start_date": user.get("trial_start_date"),
-                "trial_end_date": user.get("trial_end_date"),
-                "trial_days_remaining": 0,
-                "subscription_tier": user.get("subscription_tier", "FREE"),
-                "subscription_end_date": user.get("subscription_end_date"),
-                "free_uploads_remaining": user.get("free_uploads_remaining", 10)
-            }
-        
-            # Calculate days remaining
-            if user.get("trial_status") == "ACTIVE" and user.get("trial_end_date"):
-                days_remaining = (user["trial_end_date"] - datetime.utcnow()).days
-                trial_info["trial_days_remaining"] = max(0, days_remaining)
-        
-            return trial_info
-        except Exception as e:
-            print(f"[❌] Error getting trial info: {e}")
-            return {}
 
     @staticmethod
     def store_refresh_token(user_id: str, refresh_token: str) -> bool:
@@ -311,31 +230,3 @@ class DatabaseService:
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
-        
-    @staticmethod
-    def invalidate_refresh_tokens(user_email: str) -> bool:
-        """Invalidate ALL refresh tokens for user on logout"""
-        try:
-            from datetime import datetime
-        
-            result = users_collection.update_one(
-                {"email": user_email},
-                {
-                    "$set": {
-                        "refresh_tokens": [],  # Clear all tokens
-                        "tokens_invalidated_at": datetime.utcnow()
-                    }
-                }
-            )
-        
-            if result.modified_count > 0:
-                print(f"✅ Refresh tokens invalidated for {user_email}")
-                return True
-            else:
-                print(f"⚠️  User not found: {user_email}")
-                return False
-            
-        except Exception as e:
-            print(f"[ERROR] Failed to invalidate tokens: {e}")
-            return False
-    
