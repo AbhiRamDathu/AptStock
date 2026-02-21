@@ -195,12 +195,6 @@ uploadAndProcess: async (file, fromDate, toDate, selectedStore = 'Store A', thre
       formData.append('current_stock_dict', JSON.stringify(costData.current_stock_dict || {}));
       formData.append('lead_time_dict', JSON.stringify(costData.lead_time_dict || {}));
     }
-
-
-    // Thresholds for risk classification
-    if (thresholds && Object.keys(thresholds).length > 0) {
-      formData.append('thresholds', JSON.stringify(thresholds));
-    }
    
     // Build query string
     const params = new URLSearchParams();
