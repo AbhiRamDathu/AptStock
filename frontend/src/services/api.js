@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_BASE_URL } from '../config/apiBaseUrl';
+axios.defaults.baseURL = API_BASE_URL;
 
 
 
@@ -29,7 +30,7 @@ const apiCall = async (url, options = {}) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}${url}`, {
+    const response = await fetch(new URL(url, API_BASE_URL).toString(), {
       ...options,
       headers,
     });
@@ -119,7 +120,7 @@ export const forecastAPI = {
         formData.append('file', file);
 
         const response = await axios.post(
-            `${API_BASE_URL}/api/forecast/preview`,
+            `/api/forecast/preview`,
             formData,
             {
                 headers: {
@@ -144,7 +145,7 @@ loadSampleData: async () => {
     console.log("Loading sample data from backend...");
     
     const response = await axios.post(
-      `${API_BASE_URL}/api/forecast/upload-and-process-sample`,
+      `/api/forecast/upload-and-process-sample`,
       {},
       {
         headers: {
@@ -167,7 +168,7 @@ getSampleCSVContent: async () => {
   try {
     const token = localStorage.getItem('token');
     const response = await axios.get(
-      `${API_BASE_URL}/api/forecast/sample-data`,
+      `/api/forecast/sample-data`,
       {
         headers: {
           'Authorization': `Bearer ${token}`

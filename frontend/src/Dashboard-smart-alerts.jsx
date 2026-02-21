@@ -6,7 +6,7 @@ import Modal from "./components/Model.jsx"
 import { forecastAPI } from '../src/services/api.js';
 import LoadingSpinner from '../src/components/loadingSpinner.jsx';
 import { trialAPI } from '../src/services/api.js';
-import  {API_BASE_URL}  from '../src/config/apiBaseUrl.js';
+import  { API_BASE_URL }  from './config/apiBaseUrl';
 
 
 const designSystem = {
