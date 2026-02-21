@@ -35,7 +35,6 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "globals": "^15.0.0",
-    "picomatch": "4.0.3",
     "tailwindcss": "^4.1.13",
     "vite": "^5.4.0"
   },
@@ -43,6 +42,7 @@
     "node": ">=20 <21"
   },
   "overrides": {
+    "picomatch": "4.0.3",
       "vite": {
     "esbuild": "^0.25.0"
   },
