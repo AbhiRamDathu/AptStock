@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../config/apiBaseUrl';
 
 const ForgotPassword = () => {
   const [step, setStep] = useState(1); // 1: Email, 2: OTP, 3: New Password
@@ -20,7 +21,7 @@ const ForgotPassword = () => {
     setMessage('');
 
     try {
-      const response = await fetch('http://localhost:8001/auth/forgot-password', {
+      const response = await fetch('${API_BASE_URL}/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
@@ -92,7 +93,7 @@ const ForgotPassword = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:8001/auth/reset-password', {
+      const response = await fetch('${API_BASE_URL}/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

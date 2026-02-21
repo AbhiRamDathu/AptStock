@@ -1,13 +1,12 @@
 import axios from 'axios';
+import { API_BASE_URL } from '../config/apiBaseUrl';
 
 
-// API Service - All backend communication goes through here
-const API_BASE_URL = 'http://localhost:8000';
 
 
 // Helper to get auth token
 const getAuthToken = () => {
-  return localStorage.getItem('token'); 
+  return localStorage.getItem('token');
 };
 
 
@@ -25,7 +24,7 @@ const apiCall = async (url, options = {}) => {
   }
 
   // Don't set Content-Type for FormData (browser sets it with boundary)
-  if (!(options.body instanceof FormData)) {
+  if (options.body && !(options.body instanceof FormData))  {
     headers['Content-Type'] = 'application/json';
   }
 

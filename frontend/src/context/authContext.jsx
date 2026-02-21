@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
 import { authAPI } from '../services/api';
 import { use } from 'react';
+import { API_BASE_URL } from '../config/apiBaseUrl';
 
 
 const AuthContext = createContext(null);
@@ -12,9 +13,6 @@ export const AuthProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [accessToken, setAccessToken] = useState(localStorage.getItem('access_token'));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem('refresh_token'));
-
-
-  const API_BASE_URL = 'http://localhost:8001';
 
 
   // Check if user is logged in on mount

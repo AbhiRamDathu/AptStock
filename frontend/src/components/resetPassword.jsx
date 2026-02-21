@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { API_BASE_URL } from '../config/apiBaseUrl';
 
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
@@ -44,7 +45,7 @@ const ResetPassword = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8001/auth/verify-reset-otp', {
+      const response = await fetch('${API_BASE_URL}/auth/verify-reset-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
