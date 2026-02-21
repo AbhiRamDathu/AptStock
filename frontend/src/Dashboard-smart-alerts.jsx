@@ -6847,7 +6847,7 @@ const TrialPaywallModal = () => {
       )}
     </div>
   );
-};
+}; 
 
 
 

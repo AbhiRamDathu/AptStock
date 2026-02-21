@@ -7,7 +7,7 @@ const API_BASE_URL = 'http://localhost:8000';
 
 // Helper to get auth token
 const getAuthToken = () => {
-  return localStorage.getItem('token');
+  return localStorage.getItem('token'); 
 };
 
 

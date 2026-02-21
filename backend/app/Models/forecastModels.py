@@ -12,7 +12,7 @@ class FileAnalysis(BaseModel):
     total_units: float
     processed_at: datetime
 
-class ForecastResult(BaseModel):
+class ForecastResult(BaseModel): 
     sku: str
     item_name: str
     forecast: List[Dict[str, Any]]

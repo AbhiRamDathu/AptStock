@@ -249,4 +249,4 @@ ForecastAI Pro Team
             return {"success": True, "message": "Password reset successfully"}
         except Exception as e:
             print(f"[ERROR] in verify_and_reset_password: {e}")
-            return {"success": False, "error": "Password reset failed"}
+            return {"success": False, "error": "Password reset failed"} 

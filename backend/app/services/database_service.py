@@ -229,4 +229,4 @@ class DatabaseService:
                 "status": "unhealthy",
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
-            }
+            } 

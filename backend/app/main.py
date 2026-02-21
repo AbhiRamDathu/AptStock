@@ -11,7 +11,7 @@ from app.services.database_service import DatabaseService
 
 from datetime import datetime, timedelta
 
-from app.routes import forecast_routes, auth_routes
+from app.routes import forecast_routes, auth_routes 
 
 
 # ========== SETUP ==========
