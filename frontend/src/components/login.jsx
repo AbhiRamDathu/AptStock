@@ -1,7 +1,6 @@
 import React, { useState, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../context/authContext.jsx';
-import '../styles/auth.css';
 import LoadingSpinner from '../components/loadingSpinner.jsx';
 
 const Login = () => {

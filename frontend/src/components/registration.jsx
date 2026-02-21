@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import '../styles/auth.css'; // Optional: separate CSS file
 
 /**
  * Registration Component
