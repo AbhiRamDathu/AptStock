@@ -185,8 +185,6 @@ getSampleCSVContent: async () => {
 uploadAndProcess: async (file, fromDate, toDate, selectedStore = 'Store A', thresholds = {}, costData = {}) => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('filter_from_date', fromDate);  // ✅ ADD THIS
-    formData.append('filter_to_date', toDate);
 
 
     if (costData) {

@@ -302,9 +302,9 @@ async def preview_csv(
 async def upload_and_process_file(
     file: UploadFile = File(...),
     token: dict = Depends(verify_token),
-    filter_from_date: str = Form(None),
-    filter_to_date: str = Form(None),
-    store: Optional[str] = Form(None),
+    filter_from_date: str = Query(None),
+    filter_to_date: str = Query(None),
+    store: Optional[str] = None,
     unit_cost_dict: str = Form(None),  # NEW
     unit_price_dict: str = Form(None),  # NEW
     current_stock_dict: str = Form(None),  # NEW
@@ -2380,11 +2380,10 @@ async def get_sample_data(token: dict = Depends(verify_token)):
 @router.post("/upload-and-process-sample")
 @check_trial_status
 async def upload_and_process_sample(
-     file: UploadFile = File(...),
-     token: dict = Depends(verify_token),
-     filter_from_date: str = Form(None),
-     filter_to_date: str = Form(None),
-     store: Optional[str] = Form(None),
+    token: dict = Depends(verify_token),
+    filter_from_date: Optional[str] = Query(None),
+    filter_to_date: Optional[str] = Query(None),
+    store: Optional[str] = Query(None),
 ):
     """
     Process Hyderabad sample data exactly like /upload-and-process,
