@@ -145,15 +145,14 @@ loadSampleData: async () => {
     console.log("Loading sample data from backend...");
     
     const response = await axios.post(
-      `/api/forecast/upload-and-process-sample`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+   `${API_BASE_URL}/api/forecast/upload-and-process-sample`,
+   null,
+   {
+     headers: {
+       'Authorization': `Bearer ${token}`
+     }
+   }
+   );
     
     console.log("Sample data loaded:", response.data);
     return response.data;
