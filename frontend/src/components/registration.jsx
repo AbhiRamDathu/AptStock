@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import '../styles/auth.css'; // Optional: separate CSS file
+import { API_BASE_URL } from './config/apiBaseUrl';
+
 
 /**
  * Registration Component
@@ -137,7 +138,7 @@ const Registration = () => {
 
     try {
       // Make API request to backend
-      const response = await fetch('http://localhost:8001/auth/register', {
+      const response = await fetch('${API_BASE_URL}/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
