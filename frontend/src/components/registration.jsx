@@ -138,7 +138,7 @@ const Registration = () => {
 
     try {
       // Make API request to backend
-      const response = await fetch('${API_BASE_URL}/auth/register', {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
