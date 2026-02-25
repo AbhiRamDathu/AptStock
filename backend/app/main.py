@@ -53,7 +53,8 @@ app.add_middleware(
 app.include_router(auth_routes.router, prefix="/auth", tags=["authentication"])
 app.include_router(forecast_routes.router, prefix="/api/forecast", tags=["forecasting"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
-
+app.include_router(forecast_routes.router)
+print("✅ Forecast router loaded")
 # ========== ROOT ENDPOINTS ==========
 
 # ========== STARTUP/SHUTDOWN ==========
