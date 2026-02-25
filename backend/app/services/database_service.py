@@ -30,6 +30,11 @@ class DatabaseService:
                 "full_name": user_data["full_name"],
                 "company_name": user_data["company_name"],
                 "created_at": datetime.utcnow(),
+
+    # ✅ ADD THESE
+                "trial_status": "ACTIVE",
+                "trial_end_date": datetime.utcnow() + timedelta(days=14),
+
                 "is_verified": False,
                 "refresh_tokens": []
             }
@@ -40,12 +45,16 @@ class DatabaseService:
 
     @staticmethod
     def get_user_by_email(email: str) -> Optional[dict]:
-        """Fetch user by email"""
-        user = users_collection.find_one({"email": email})
-        if user:
-            user["id"] = str(user["_id"])
-            del user["_id"]
-        return user
+        """Fetch user by email (safe)"""
+        try:
+            user = users_collection.find_one({"email": email})
+            if user:
+                user["id"] = str(user["_id"])
+                del user["_id"]
+            return user
+        except Exception as e:
+            print(f"[DB] get_user_by_email failed: {type(e).__name__}: {e}")
+            return None
 
     @staticmethod
     def get_user_by_id(user_id: str) -> Optional[dict]:

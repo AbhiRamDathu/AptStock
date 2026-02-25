@@ -41,25 +41,34 @@ async def register(user: UserRegistration):
 @router.post("/login")
 async def login(credentials: UserLogin):
     """Login user"""
-    result = AuthService.login_user(
-        credentials.email, 
-        credentials.password, 
-        credentials.stay_logged_in  # ✅ Pass this flag to service
-    )
-    
-    if not result["success"]:
-        raise HTTPException(status_code=401, detail=result["error"])
-    
-    # ✅ NEW: Ensure refresh_token is in response
-    # (Your AuthService should generate it when stay_logged_in=True)
-    return {
-        "success": True,
-        "access_token": result.get("access_token"),
-        "refresh_token": result.get("refresh_token"),  # ✅ Add this
-        "user": result.get("user"),
-        "message": "Login successful"
-    }
+    try:
+        print(f"[LOGIN] Attempt: {credentials.email} stay_logged_in={credentials.stay_logged_in}")
 
+        result = AuthService.login_user(
+            credentials.email,
+            credentials.password,
+            credentials.stay_logged_in
+        )
+
+        print(f"[LOGIN] Result success={result.get('success')}")
+
+        if not result.get("success"):
+            raise HTTPException(status_code=401, detail=result.get("error", "Login failed"))
+
+        return {
+            "success": True,
+            "access_token": result.get("access_token"),
+            "refresh_token": result.get("refresh_token"),
+            "user": result.get("user"),
+            "message": "Login successful"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # THIS will show the real stack reason in Render logs
+        print(f"[LOGIN] CRASH: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.get("/me")
 async def get_current_user(authorization: str = Header(None)):

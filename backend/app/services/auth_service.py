@@ -30,9 +30,15 @@ class AuthService:
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verify password against hash"""
-        return pwd_context.verify(plain_password, hashed_password)
-
+        """Verify password against hash (safe: never throw 500)"""
+        try:
+            if not hashed_password or not isinstance(hashed_password, str):
+                return False
+            return pwd_context.verify(plain_password, hashed_password)
+        except Exception as e:
+            # This is the key: prevent 500 and log real reason in Render logs
+            print(f"[AUTH] verify_password failed: {type(e).__name__}: {e}")
+            return False
 
     @staticmethod
     def create_access_token(user_id: str, email: str) -> str:
@@ -99,33 +105,47 @@ class AuthService:
     @staticmethod
     def login_user(email: str, password: str, stay_logged_in: bool = False) -> Dict:
         """Authenticate user"""
-        user = DatabaseService.get_user_by_email(email)
-       
-        if not user or not AuthService.verify_password(password, user.get("password_hash", "")):
-            return {"success": False, "error": "Invalid email or password"}
 
+        try:
+            user = DatabaseService.get_user_by_email(email)
 
-        access_token = AuthService.create_access_token(user["id"], email)
-        response = {
-            "success": True,
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "full_name": user.get("full_name", ""),
-                "company_name": user.get("company_name", "")
+            if not user:
+                return {"success": False, "error": "Invalid email or password"}
+
+            password_hash = user.get("password_hash")
+
+            if not password_hash:
+                print(f"[ERROR] Missing password hash for user: {email}")
+                return {"success": False, "error": "Account configuration error"}
+
+        # Verify password safely
+            if not AuthService.verify_password(password, password_hash):
+                return {"success": False, "error": "Invalid email or password"}
+
+        # Create tokens
+            access_token = AuthService.create_access_token(user["id"], email)
+
+            response = {
+                "success": True,
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": {
+                    "id": user["id"],
+                    "email": user["email"],
+                    "full_name": user.get("full_name", ""),
+                    "company_name": user.get("company_name", "")
+                }
             }
-        }
 
+            if stay_logged_in:
+                refresh_token = AuthService.create_refresh_token(user["id"])
+                response["refresh_token"] = refresh_token
 
-        if stay_logged_in:
-            refresh_token = AuthService.create_refresh_token(user["id"])
-            response["refresh_token"] = refresh_token
+            return response
 
-
-        return response
-
+        except Exception as e:
+            print(f"[LOGIN ERROR] {e}")
+            return {"success": False, "error": "Login failed"}
 
     @staticmethod
     def request_password_reset(email: str) -> Dict:

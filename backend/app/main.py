@@ -20,9 +20,6 @@ load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create a router for admin endpoints
-admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
-
 # ========== MONGODB ==========
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "apdf_io_mongo")
@@ -40,20 +37,22 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+origins = ["http://localhost:5173", "http://127.0.0.1:5173", "https://aptstock.pages.dev", "https://aptstock.onrender.com"]
+
 # ========== CORS MIDDLEWARE ==========
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "https://d69bd310.aptstock.pages.dev"],  # Vite default port
+    allow_origins=origins,  # Vite default port
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # ========== ROUTES ==========
 app.include_router(auth_routes.router, prefix="/auth", tags=["authentication"])
 app.include_router(forecast_routes.router, prefix="/api/forecast", tags=["forecasting"])
-app.include_router(forecast_routes.router)
-
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 # ========== ROOT ENDPOINTS ==========
 
