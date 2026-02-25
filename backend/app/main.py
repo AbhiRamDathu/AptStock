@@ -74,9 +74,11 @@ def root():
         "version": "2.0.0"
     }
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "service": "ForecastAI Pro"}
+from fastapi import FastAPI, Response
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health():
+    return {"status": "ok"}
 
 @admin_router.get("/health")
 async def system_health():
