@@ -80,7 +80,7 @@ from fastapi import FastAPI, Response
 async def health():
     return {"status": "ok"}
 
-@admin_router.get("/health")
+@admin_router.get("/health", methods=["GET", "HEAD"])
 async def system_health():
     """
     Simple health check - can be called by monitoring tools
