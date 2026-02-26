@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './context/authContext.jsx';
 import ProtectedRoute from './components/protectedRoute.jsx';
 import Register from './components/registration.jsx';
+import "./index.css";
 import Login from './components/login.jsx';
 import ForgotPassword from './components/forgotpassword.jsx';
 import ResetPassword from './components/resetPassword.jsx';
