@@ -92,17 +92,20 @@ class DatabaseService:
             return False
 
     @staticmethod
-    def remove_refresh_token(user_id: str, refresh_token: str) -> bool:
-        """Remove refresh token (logout)"""
+    def invalidate_refresh_tokens(user_id: str) -> bool:
+        """
+        Remove all refresh tokens for a user (force logout everywhere)
+        """
         try:
             users_collection.update_one(
                 {"_id": ObjectId(user_id)},
-                {"$pull": {"refresh_tokens": refresh_token}}
+                {"$set": {"refresh_tokens": []}}
             )
             return True
-        except:
+        except Exception as e:
+            print(f"[ERROR] Failed to invalidate tokens: {e}")
             return False
-
+    
     @staticmethod
     def set_reset_otp(email: str, otp_code: str, expiry: datetime) -> bool:
         """Store OTP and expiry on user document"""
