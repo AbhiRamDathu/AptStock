@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { API_BASE_URL } from '../config/apiBaseUrl';
-import '../styles/auth.css'
+import '../Styles/auth.css'
 
 
 /**
