@@ -152,35 +152,33 @@ class AuthService:
         """Request password reset: Generate OTP and SEND EMAIL"""
         try:
             user = DatabaseService.get_user_by_email(email)
+
             if not user:
                 return {"success": True, "message": "If email exists, reset code sent"}
 
-
-            # Generate 6-digit OTP
+        # Generate OTP
             otp_code = "{:06d}".format(random.randint(0, 999999))
             expiry = datetime.utcnow() + timedelta(minutes=10)
 
-
-            # Store OTP in database
+        # Store OTP
             DatabaseService.set_reset_otp(email, otp_code, expiry)
+
             print(f"[DEBUG] OTP stored for {email}: {otp_code}")
 
+        # Send Email
+            AuthService.send_password_reset_otp_email(email, otp_code)
 
-            # SEND EMAIL WITH OTP - THIS IS THE KEY!
-            email_sent = AuthService.send_password_reset_otp_email(email, otp_code)
-           
-            if email_sent:
-                print(f"[SUCCESS] OTP email sent for {email}")
-                return {"success": True, "message": "Reset code sent"}
-            else:
-                print(f"[ERROR] Failed to send email for {email}")
-                return {"success": True, "message": "If email exists, reset code sent"}
-
+            return {
+                "success": True,
+                "message": "If email exists, reset code sent"
+            }
 
         except Exception as e:
-            print(f"[ERROR] in request_password_reset: {e}")
-            return {"success": True, "message": "If email exists, reset code sent"}
-
+            print(f"[ERROR] request_password_reset: {e}")
+            return {
+                "success": True,
+                "message": "If email exists, reset code sent"
+            }
 
     @staticmethod
     def send_password_reset_otp_email(email: str, otp_code: str) -> bool:
