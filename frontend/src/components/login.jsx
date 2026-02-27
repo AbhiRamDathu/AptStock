@@ -2,6 +2,7 @@ import React, { useState, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../context/authContext.jsx';
 import LoadingSpinner from '../components/loadingSpinner.jsx';
+import "../Styles/login.css";
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -47,17 +48,17 @@ const Login = () => {
 
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.logo}>🤖 AptStock Pro</div>
-        <h1 style={styles.heading}>Welcome Back</h1>
-        <p style={styles.subtitle}>Login to access your Projections</p>
+    <div className="login-container">
+      <div className='login-card'>
+        <div className='login-logo'>🤖 AptStock Pro</div>
+        <h1 className='login-heading'>Welcome Back</h1>
+        <p className='login-subtitle'>Login to access your Projections</p>
 
-        {error && <div style={styles.error}>{error}</div>}
+        {error && <div className="login-error">{error}</div>}
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email Address</label>
+        <form onSubmit={handleSubmit} className='login-form'>
+          <div className='login-group '>
+            <label className='login-label '>Email Address</label>
             <input
               type="email"
               name="email"
@@ -65,13 +66,13 @@ const Login = () => {
               onChange={handleChange}
               required
               placeholder="you@company.com"
-              style={styles.input}
+              className='login-input'
             />
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Password</label>
-            <div style={styles.passwordField}>
+          <div className='login-group'>
+            <label className='login-label'>Password</label>
+            <div className='password-field'>
             <input
               type={showPassword ? 'text' : 'password'}
               name="password"
@@ -79,11 +80,11 @@ const Login = () => {
               onChange={handleChange}
               required
               placeholder="Enter your password"
-              style={styles.input}
+              className='login-input'
             />
             <button
               type="button"
-              style={styles.passwordToggle}
+              className='password-toggle'
               onClick={togglePasswordVisibility}
               title={showPassword ? 'Hide password' : 'Show password'}
             >
@@ -92,19 +93,19 @@ const Login = () => {
           </div>
           </div>
 
-          <div style={styles.optionsRow}>
-            <label style={styles.checkboxLabel}>
+          <div className='options-row'>
+            <label className='checkbox-label'>
               <input
                 type="checkbox"
                 name="stayLoggedIn"
                 checked={formData.stayLoggedIn}
                 onChange={handleChange}
-                style={styles.checkbox}
+                className='checkbox-label'
               />
-              <span style={styles.checkboxText}>Stay logged in (7 days)</span>
+              <span className='check-label'>Stay logged in (7 days)</span>
             </label>
 
-            <Link to="/forgot-password" style={styles.forgotLink}>
+            <Link to="/forgot-password" className='forgot-link'>
               Forgot password?
             </Link>
           </div>
@@ -112,6 +113,7 @@ const Login = () => {
           <button
   type="submit"
   disabled={loading}
+  className="login-button"
   style={{
     ...styles.button,
     opacity: loading ? 0.8 : 1,
@@ -131,9 +133,9 @@ const Login = () => {
 </button>
         </form>
 
-        <p style={styles.footerText}>
+        <p className='footer-text'>
           Don't have an account?{' '}
-          <Link to="/register" style={styles.link}>Register here</Link>
+          <Link to="/register" className='footer-link'>Register here</Link>
         </p>
       </div>
     </div>
@@ -154,11 +156,11 @@ const styles = {
     borderRadius: '16px',
     padding: '40px',
     boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
-    maxWidth: '440px',
+    maxWidth: '540px',
     width: '100%',
   },
   logo: {
-    fontSize: '28px',
+    fontSize: '34px',
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: '8px',
@@ -195,7 +197,7 @@ const styles = {
     color: '#374151',
   },
   input: {
-    padding: '12px 140px',
+    padding: '12px 155px',
     borderRadius: '8px',
     border: '1px solid #d1d5db',
     fontSize: '14px',
@@ -205,6 +207,7 @@ const styles = {
   },
   passwordField: {
   position: 'relative',
+  right: '5px',
   display: 'flex',
   alignItems: 'center',
 },
