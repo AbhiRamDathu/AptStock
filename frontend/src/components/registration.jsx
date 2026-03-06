@@ -193,9 +193,9 @@ const Registration = () => {
         {/* Header */}
         <div className="auth-header">
           <div className="auth-logo">📊</div>
-          <h1>ForecastAI Pro</h1>
+          <h1>AptStock Pro</h1>
           <p className="auth-subtitle">Create Your Account</p>
-          <p className="auth-description">Start forecasting smarter inventory decisions</p>
+          <p className="auth-description">Start projection smarter inventory decisions</p>
         </div>
 
         {/* Error Message */}

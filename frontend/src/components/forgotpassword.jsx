@@ -130,7 +130,7 @@ const ForgotPassword = () => {
       <div className="fp-icon">📦</div>
 
       <h2 className="fp-title">
-        ForecastAI Pro
+        AptStock Pro
       </h2>
 
       <h3 className="fp-subtitle">

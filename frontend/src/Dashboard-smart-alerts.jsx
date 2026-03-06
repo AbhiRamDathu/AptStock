@@ -1089,7 +1089,7 @@ const handleWatchVideo = () => {
         color: "#4b5563",
         paddingLeft: "20px"
       }}>
-        <li>🤖 <strong>Live AI forecasting</strong> with real inventory data</li>
+        <li>🤖 <strong>Live in projection</strong> with real inventory data</li>
         <li>📈 <strong>Real customer success stories</strong> - 15% revenue increase</li>
         <li>💰 <strong>ROI calculator</strong> with actual numbers</li>
         <li>🎯 <strong>Priority action alerts</strong> for restocking</li>
@@ -1518,7 +1518,7 @@ const handleUpgradeROICalculator = (newMultiplier) => {
   };
 
   const handleContactSales = () => {
-    alert('📞 Enterprise Sales Team:\n\n🏢 Custom Excel integrations\n💰 Volume processing discounts\n🎯 Dedicated support team\n📈 Advanced forecasting models\n\n☎️ Direct: +91-9876-FORECAST\n📧 Enterprise: sales@forecastai.com');
+    alert('📞 Enterprise Sales Team:\n\n🏢 Custom Excel integrations\n💰 Volume processing discounts\n🎯 Dedicated support team\n📈 Advanced prophecy models\n\n☎️ Direct: +91-9000-APTSTOCK\n📧 Enterprise: aptstock@gmail.com');
   };
 
 // Export full historical item-level data to CSV
@@ -1562,7 +1562,7 @@ const handleExportHistoricalData = () => {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  const filename = `ForecastAI-HistoricalItems-${new Date()
+  const filename = `AptStock-HistoricalItems-${new Date()
     .toISOString()
     .split('T')[0]}.csv`;
 
@@ -1605,7 +1605,7 @@ const handleExportHistoricalData = () => {
       const link = document.createElement('a');
       
       link.setAttribute('href', url);
-      link.setAttribute('download', `ForecastAI-Inventory-${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `AptStock-Inventory-${new Date().toISOString().split('T')[0]}.csv`);
       link.style.visibility = 'hidden';
       
       document.body.appendChild(link);
@@ -1662,7 +1662,7 @@ const handleExportHistoricalData = () => {
     link.setAttribute('href', url);
     link.setAttribute(
       'download',
-      `ForecastAI-Priority-Actions-${new Date().toISOString().split('T')[0]}.csv`
+      `AptStock-Priority-Actions-${new Date().toISOString().split('T')[0]}.csv`
     );
     link.style.visibility = 'hidden';
 
@@ -1687,7 +1687,7 @@ const handleExportHistoricalData = () => {
  * Uses actual sales data, forecasts, and inventory recommendations
  * 
  * @param {Array} historicalData - Historical sales data from backend
- * @param {Array} forecastData - AI-generated forecasts from backend
+ * @param {Array} forecastData - A-generated prophecy from backend
  * @param {string} dateRange - Date range string for display
  * @returns {Object} Calculated ROI metrics
  */
@@ -2158,7 +2158,7 @@ const businessMetrics = calculateFileBasedROI();
             letterSpacing: '0.2px'
           }}
         >
-          📞 +1-900-FORECAST
+          📞 +1-900-APTSTOCK
         </button>
       </div>
     </div>
@@ -2823,7 +2823,7 @@ const businessMetrics = calculateFileBasedROI();
                   fontWeight: '600',
                   color: '#15803d'
                 }}>
-                  Builds AI Trust
+                  Builds IN Trust
                 </div>
               </div>
             </div>
@@ -4405,7 +4405,7 @@ const businessMetrics = calculateFileBasedROI();
                                            }}>
                                              <strong style={{color: "#166534", fontSize: "15px"}}>✅ Recommended Action:</strong>
                                              <p style={{margin: "8px 0 0 0", color: "#166534", fontSize: "14px"}}>
-                                               {action.recommendedaction || 'Optimize stock levels based on AI forecast'}
+                                               {action.recommendedaction || 'Optimize stock levels based on A prophecy'}
                                              </p>
                                            </div>
                                    
@@ -4414,7 +4414,7 @@ const businessMetrics = calculateFileBasedROI();
                                              <strong style={{color: "#3b82f6"}}>📊 Analysis Based On:</strong>
                                              <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569"}}>
                                                <li>Historical sales patterns from uploaded file</li>
-                                               <li>Professional AI demand analysis</li>
+                                               <li>Professional IN demand analysis</li>
                                                <li>Revenue risk assessment</li>
                                                <li>Date range: {filterFromDate} to {filterToDate}</li>
                                              </ul>
@@ -5268,8 +5268,8 @@ const businessMetrics = calculateFileBasedROI();
             🎁 Pro Features You'll Unlock:
           </strong>
           <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569", fontSize: "14px", lineHeight: "1.8"}}>
-            <li>Unlimited forecast charts (vs 5 in free)</li>
-            <li>Advanced AI models (Prophet + SARIMA + LSTM)</li>
+            <li>Unlimited projection charts (vs 5 in free)</li>
+            <li>Advanced  models (demand + intelligent + prophecy)</li>
             <li>Export to Excel & PDF</li>
             <li>Smart alerts & notifications</li>
             <li>Multi-user team access</li>
@@ -5546,8 +5546,8 @@ const businessMetrics = calculateFileBasedROI();
                 Contact Us
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                📞 Sales: +91-900897418-FORECAST<br />
-                📧 Support: abhiramdathuvelishala@gmail.com<br />
+                📞 Sales: +91-900897418-APTSTOCK<br />
+                📧 Support: aptstock@gmail.com<br />
                 💬 Response time: &lt; 2 hours
               </div>
             </div>
@@ -5556,9 +5556,9 @@ const businessMetrics = calculateFileBasedROI();
                 Enterprise
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                📧 abhiramdathuvelishala@gmail.com<br />
+                📧 aptstock@gmail.com<br />
                 📞 +91-900897418-ENTERPRISE<br />
-                🗓️ Book demo: calendly.com/forecastai
+                🗓️ Book demo: calendly.com/aptstock
               </div>
             </div>
             <div>
@@ -5582,7 +5582,7 @@ const businessMetrics = calculateFileBasedROI();
             fontSize: '14px',
             opacity: '0.8'
           }}>
-            © 2025 ForecastAI Pro. All rights reserved. | Privacy Policy | Terms of Service | Security
+            © 2025 AptStock Pro. All rights reserved. | Privacy Policy | Terms of Service | Security
           </div>
         </div>
       </footer>
@@ -5653,7 +5653,7 @@ const businessMetrics = calculateFileBasedROI();
           fontWeight: '800',
           marginBottom: '8px'
         }}>
-          Start Your 14-Day FREE Trial!
+          Start Your 30-Day FREE Trial!
         </h2>
         <p style={{
           margin: 0,
@@ -5673,12 +5673,12 @@ const businessMetrics = calculateFileBasedROI();
         }}>
           {[
             'Process your Excel files with any date range',
-            'All Pro forecasting features with item names',
+            'All Pro projection features with item names',
             'Full customer date filtering',
             'No credit card required',
             'Cancel anytime',
             'Setup takes 5 minutes!',
-            'Call: +91-9000897418 -98% FORECAST'
+            'Call: +91-9000897418 -98% PROJECTION'
           ].map((feature, index) => (
             <div key={index} style={{
               display: 'flex',
@@ -5745,7 +5745,7 @@ const businessMetrics = calculateFileBasedROI();
           fontSize: '13px',
           color: '#64748b'
         }}>
-          Join 500+ retailers already using ForecastAI Pro
+          Join 500+ retailers already using AptStock Pro
         </div>
       </div>
     </div>
@@ -5817,10 +5817,10 @@ const businessMetrics = calculateFileBasedROI();
       }}>
         <div style={{ fontSize: '48px', marginBottom: '12px' }}>🚀</div>
         <h2 style={{ margin: 0, fontSize: '32px', fontWeight: '800' }}>
-          Upgrade to ForecastAI Pro
+          Upgrade to AptStock Pro
         </h2>
         <p style={{ margin: '8px 0 0', fontSize: '16px', opacity: 0.95 }}>
-          Unlock unlimited forecasting power for your business
+          Unlock unlimited prophecy power for your business
         </p>
       </div>
 
@@ -5835,13 +5835,13 @@ const businessMetrics = calculateFileBasedROI();
           marginBottom: '32px'
         }}>
           {[
-            { icon: '📊', title: 'Unlimited Forecast Charts', desc: 'Generate forecasts for all your products without limits' },
-            { icon: '📈', title: 'Advanced AI Models', desc: 'Access Prophet, SARIMA, and LSTM forecasting models' },
-            { icon: '📅', title: 'Custom Date Ranges', desc: 'Forecast for any time period - weeks, months, or years' },
-            { icon: '💾', title: 'Export to Excel & PDF', desc: 'Download your forecasts in multiple formats' },
+            { icon: '📊', title: 'Unlimited Projection Charts', desc: 'Generate projections for all your products without limits' },
+            { icon: '📈', title: 'Advanced  Models', desc: 'Access demand, intelligent, and prophecy projection models' },
+            { icon: '📅', title: 'Custom Date Ranges', desc: 'Projection for any time period - weeks, months, or years' },
+            { icon: '💾', title: 'Export to Excel & PDF', desc: 'Download your projections in multiple formats' },
             { icon: '🔔', title: 'Smart Alerts & Notifications', desc: 'Get alerts for stockouts and demand spikes' },
-            { icon: '👥', title: 'Multi-User Access', desc: 'Collaborate with your team on forecasts' },
-            { icon: '🎯', title: '99.2% Accuracy', desc: 'Industry-leading forecast accuracy' },
+            { icon: '👥', title: 'Multi-User Access', desc: 'Collaborate with your team on projections' },
+            { icon: '🎯', title: '99.2% Accuracy', desc: 'Industry-leading projection accuracy' },
             { icon: '⚡', title: 'Priority Support', desc: '24/7 dedicated customer support' }
           ].map((feature, index) => (
             <div key={index} style={{
@@ -5879,10 +5879,10 @@ const businessMetrics = calculateFileBasedROI();
             Special Launch Offer
           </div>
           <div style={{ fontSize: '48px', fontWeight: '900', marginBottom: '4px' }}>
-            ₹4,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
+            ₹2,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
           </div>
           <div style={{ fontSize: '14px', opacity: 0.9 }}>
-            <s>₹9,999/month</s> • Save 50% for first 3 months
+            <s>₹8,999/month</s> • Save 50% for first 3 months
           </div>
         </div>
 
@@ -5911,13 +5911,13 @@ const businessMetrics = calculateFileBasedROI();
               <span style={{ fontSize: '20px' }}>📧</span>
               <div>
                 <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Email</div>
-                <a href="mailto:abhiramdathuvelishala11@gmail.com" style={{
+                <a href="mailto:aptstock@gmail.com" style={{
                   fontSize: '16px',
                   fontWeight: '600',
                   color: '#2563eb',
                   textDecoration: 'none'
                 }}>
-                  abhiramdathuvelishala@gmail.com
+                  aptstock@gmail.com
                 </a>
               </div>
             </div>
@@ -5926,13 +5926,13 @@ const businessMetrics = calculateFileBasedROI();
               <span style={{ fontSize: '20px' }}>☎️</span>
               <div>
                 <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Phone (Enterprise Sales)</div>
-                <a href="tel:+1900FORECAST" style={{
+                <a href="tel:+1900APTSTOCK" style={{
                   fontSize: '16px',
                   fontWeight: '600',
                   color: '#2563eb',
                   textDecoration: 'none'
                 }}>
-                  +91-9000897418-FORECAST
+                  +91-9000897418-APTSTOCK
                 </a>
               </div>
             </div>
@@ -5956,13 +5956,13 @@ const businessMetrics = calculateFileBasedROI();
               <span style={{ fontSize: '20px' }}>🌐</span>
               <div>
                 <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Website</div>
-                <a href="https://forecastai.pro" target="_blank" rel="noopener noreferrer" style={{
+                <a href="https://aptstock.pages.dev" target="_blank" rel="noopener noreferrer" style={{
                   fontSize: '16px',
                   fontWeight: '600',
                   color: '#2563eb',
                   textDecoration: 'none'
                 }}>
-                  www.forecastai.pro
+                  https://aptstock.pages.dev
                 </a>
               </div>
             </div>
@@ -5972,9 +5972,7 @@ const businessMetrics = calculateFileBasedROI();
         {/* CTA Buttons */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <button
-            onClick={() => {
-              window.location.href = 'tel:+1900FORECAST';
-            }}
+            
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               color: 'white',
@@ -5993,7 +5991,7 @@ const businessMetrics = calculateFileBasedROI();
 
           <button
             onClick={() => {
-              window.location.href = 'mailto:abhiramdathuvelishala@gmail.com?subject=Upgrade to Pro Request';
+              window.location.href = 'mailto:aptstock@gmail.com?subject=Upgrade to Pro Request';
             }}
             style={{
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -6147,10 +6145,10 @@ const businessMetrics = calculateFileBasedROI();
               { icon: '👥', text: 'Custom Excel integrations' },
               { icon: '💰', text: 'Volume processing discounts' },
               { icon: '🎧', text: 'Dedicated support team' },
-              { icon: '📊', text: 'Advanced forecasting models' },
+              { icon: '📊', text: 'Advanced projection models' },
               { icon: '🔧', text: 'Custom API access' },
               { icon: '🏢', text: 'Multi-location support' },
-              { icon: '📈', text: 'Unlimited SKU forecasting' },
+              { icon: '📈', text: 'Unlimited SKU prophecy' },
               { icon: '⚡', text: 'Priority processing & SLA guarantees' }
             ].map((item, index) => (
               <div key={index} style={{
@@ -6235,14 +6233,14 @@ const businessMetrics = calculateFileBasedROI();
               <div style={{ fontSize: '14px', color: '#64748b', fontWeight: '600', marginBottom: '4px' }}>
                 Direct Line (24/7)
               </div>
-              <a href="tel:+91-9000897418 FORECAST" style={{
+              <a href="tel:+91-9000897418 APTSTOCK" style={{
                 fontSize: '20px',
                 fontWeight: '800',
                 color: '#3b82f6',
                 textDecoration: 'none',
                 display: 'block'
               }}>
-                📞 +91-9000897418-FORECAST
+                📞 +91-9000897418-APTSTOCK
               </a>
             </div>
           </div>
@@ -6276,14 +6274,14 @@ const businessMetrics = calculateFileBasedROI();
               <div style={{ fontSize: '14px', color: '#64748b', fontWeight: '600', marginBottom: '4px' }}>
                 Enterprise Email
               </div>
-              <a href="mailto:abhiramdathuvelishala@gmail.com?subject=Enterprise Inquiry" style={{
+              <a href="mailto:aptstock@gmail.com?subject=Enterprise Inquiry" style={{
                 fontSize: '18px',
                 fontWeight: '700',
                 color: '#3b82f6',
                 textDecoration: 'none',
                 display: 'block'
               }}>
-                abhiramdathuvelishala@gmail.com
+                aptstock@gmail.com
               </a>
             </div>
           </div>
@@ -6317,7 +6315,7 @@ const businessMetrics = calculateFileBasedROI();
               <div style={{ fontSize: '14px', color: '#64748b', fontWeight: '600', marginBottom: '4px' }}>
                 WhatsApp Business
               </div>
-              <a href="https://wa.me/19007623278?text=Hi, I'm interested in ForecastAI Enterprise" 
+              <a href="https://wa.me/19007623278?text=Hi, I'm interested in AptStock Enterprise" 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 style={{
@@ -6337,7 +6335,7 @@ const businessMetrics = calculateFileBasedROI();
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '20px' }}>
           <button
             onClick={() => {
-              window.location.href = 'tel:+1900FORECAST';
+              window.location.href = 'tel:+19000APTSTOCK';
             }}
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
@@ -6362,7 +6360,7 @@ const businessMetrics = calculateFileBasedROI();
 
           <button
             onClick={() => {
-              window.location.href = 'mailto:abhiramdathuvelishala@gmail.com?subject=Enterprise Sales Inquiry&body=Hi, I would like to discuss enterprise solutions.';
+              window.location.href = 'mailto:aptstock@gmail.com?subject=Enterprise Sales Inquiry&body=Hi, I would like to discuss enterprise solutions.';
             }}
             style={{
               background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
@@ -6443,7 +6441,7 @@ const TrialPaywallModal = () => {
       savingsPercent: '17%',
       features: [
         '✅ Up to 10 products',
-        '✅ Basic forecasting',
+        '✅ Basic projection',
         '✅ Email support',
         '✅ 30-day data retention',
         '❌ Custom integrations',
@@ -6459,7 +6457,7 @@ const TrialPaywallModal = () => {
       savingsPercent: '17%',
       features: [
         '✅ Unlimited products',
-        '✅ Advanced AI forecasting',
+        '✅ Advanced projections',
         '✅ Priority email support',
         '✅ 1-year data retention',
         '✅ Custom integrations',
@@ -6502,7 +6500,7 @@ const TrialPaywallModal = () => {
 
   const handleContactSales = () => {
     console.log('Opening contact sales form');
-    alert('📞 Enterprise Sales Team will contact you within 2 hours.\n\n☎️ Direct: +91-9876-FORECAST\n📧 Email: sales@forecastai.com');
+    alert('📞 Enterprise Sales Team will contact you within 2 hours.\n\n☎️ Direct: +91-9000-APTSTOCK\n📧 Email: aptstock@gmail.com');
   };
 
   return (
@@ -6549,7 +6547,7 @@ const TrialPaywallModal = () => {
             margin: 0,
             fontWeight: '500'
           }}>
-            Unlock unlimited forecasting, advanced AI models, and priority support. 
+            Unlock unlimited projections, advanced models, and priority support. 
             Choose your plan and continue optimizing inventory today.
           </p>
         </div>
