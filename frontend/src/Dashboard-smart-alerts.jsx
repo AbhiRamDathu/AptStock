@@ -6,7 +6,7 @@ import Modal from "./components/Model.jsx"
 import { forecastAPI } from '../src/services/api.js';
 import LoadingSpinner from '../src/components/loadingSpinner.jsx';
 import { trialAPI } from '../src/services/api.js';
-import  { API_BASE_URL }  from './config/apiBaseUrl';
+import { API_BASE_URL } from './config/apiBaseUrl';
 
 
 const designSystem = {
@@ -134,49 +134,7 @@ const [modalContent, setModalContent] = useState(null);
     return () => clearInterval(interval);
   }, [loading, uploadStartTime]);
 
-  useEffect(() => {
-// Only trigger if:
-// 1. File is uploaded AND
-// 2. We have CSV data AND
-// 3. Dates are valid AND
-// 4. Dates have actually changed
-    if (!hasUploadedFile || !rawCsvData) {
-  console.log('⏭️  Skipping: File not uploaded yet');
-  return;
-}
-
-if (!filterFromDate || !filterToDate) {
-  console.log('⏭️  Skipping: Dates not set');
-  return;
-}
-
-// Check if this is a NEW date change (not initial render)
-const currentDateKey = `${filterFromDate}|${filterToDate}|${filterStore}`;
-
-if (currentDateKey === lastProcessedDateRange) {
-  console.log('⏭️  Skipping: Same date range already processed');
-  return;
-}
-
-console.log('🔥 DATE RANGE CHANGED - Recalculating:', {
-  from: filterFromDate,
-  to: filterToDate,
-  previous: lastProcessedDateRange,
-  current: currentDateKey
-});
-
-// Mark as processing to prevent loops
-setLastProcessedDateRange(currentDateKey);
-
-// Debounce: Wait 500ms before calling to catch rapid changes
-const debounceTimer = setTimeout(() => {
-  console.log('⚡ Triggering date filter apply...');
-  handleApplyDateFilters();
-}, 500);
-
-return () => clearTimeout(debounceTimer);
-  }, [filterFromDate, filterToDate, filterStore, hasUploadedFile, rawCsvData, lastProcessedDateRange]);
-
+ 
   // ✅ NEW: Listen for trial_expired events from API
 useEffect(() => {
   const handleTrialExpired = (event) => {
@@ -790,16 +748,31 @@ console.log('✅ Mapped Data Result:', {
       setHasUploadedFile(true);
 
       // Update date filters if provided
-      if (response.summary && response.summary.date_range) {
-      console.log('📅 Setting dates from file:', response.summary.date_range);
-          const fileStartDate = response.summary.date_range.start;
-    const fileEndDate = response.summary.date_range.end;
-    
-    setFilterFromDate(fileStartDate);
-    setFilterToDate(fileEndDate);
-    
-    console.log('✅ Date filters updated:', fileStartDate, 'to', fileEndDate);
-  } else if (response.historical && response.historical.length > 0) {
+     if (response.summary && response.summary.date_range) {
+
+  const fileEndDate = response.summary.date_range.end;
+
+  // Convert last historical date
+  const lastDate = new Date(fileEndDate);
+
+  // Forecast start = next day
+  const forecastStart = new Date(lastDate);
+  forecastStart.setDate(lastDate.getDate() + 1);
+
+  // Forecast end = next 15 days
+  const forecastEnd = new Date(lastDate);
+  forecastEnd.setDate(lastDate.getDate() + 15);
+
+  const formatDate = (date) => date.toISOString().split("T")[0];
+
+  setFilterFromDate(formatDate(forecastStart));
+  setFilterToDate(formatDate(forecastEnd));
+
+  console.log("✅ Forecast date range set:", {
+    from: formatDate(forecastStart),
+    to: formatDate(forecastEnd)
+  });
+}else if (response.historical && response.historical.length > 0) {
     // Fallback: Extract from historical data
     const dates = response.historical.map(h => new Date(h.date));
     const minDate = new Date(Math.min(...dates));
