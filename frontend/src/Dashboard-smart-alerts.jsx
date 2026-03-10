@@ -6652,7 +6652,7 @@ const TrialPaywallModal = () => {
               {/* CTA Button */}
               {plan.name === 'ENTERPRISE' ? (
                 <button
-                  onClick={handleContactSales}
+                  
                   style={{
                     width: '100%',
                     padding: '16px',
