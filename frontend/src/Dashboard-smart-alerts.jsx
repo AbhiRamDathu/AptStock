@@ -2628,7 +2628,7 @@ const businessMetrics = calculateFileBasedROI();
                   'SKU/Product ID column',
                   'Store/Location column',
                   'Units sold column',
-                  'Minimum 30 days of data',
+                  'Minimum 14 days of data',
                   'No missing critical values'
                 ].map((requirement, index) => (
                   <div key={index} style={{
@@ -5546,7 +5546,7 @@ const businessMetrics = calculateFileBasedROI();
                 Contact Us
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                📞 Sales: +91-900897418-APTSTOCK<br />
+                📞 Sales: +91-9000897418-APTSTOCK<br />
                 📧 Support: aptstock@gmail.com<br />
                 💬 Response time: &lt; 2 hours
               </div>
@@ -5557,7 +5557,7 @@ const businessMetrics = calculateFileBasedROI();
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
                 📧 aptstock@gmail.com<br />
-                📞 +91-900897418-ENTERPRISE<br />
+                📞 +91-9000897418-ENTERPRISE<br />
                 🗓️ Book demo: calendly.com/aptstock
               </div>
             </div>
@@ -5653,7 +5653,7 @@ const businessMetrics = calculateFileBasedROI();
           fontWeight: '800',
           marginBottom: '8px'
         }}>
-          Start Your 30-Day FREE Trial!
+          Start Your 14-Day FREE Trial!
         </h2>
         <p style={{
           margin: 0,
