@@ -1,11 +1,15 @@
 import secrets
-import random
+import random, os, requests
 import smtplib
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from email.mime.text import MIMEText
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "lingarajuvelishala11@gmail.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aptstock.pages.dev")
 
 
 from app.config import (
@@ -196,52 +200,51 @@ class AuthService:
 
     @staticmethod
     def send_password_reset_otp_email(email: str, otp_code: str) -> bool:
-        """Send OTP email (6-digit code only, no link)"""
+        """Send OTP email using Resend API"""
         try:
-            if not SMTP_EMAIL or not SMTP_PASSWORD or not SMTP_SERVER or not SMTP_PORT:
-                print("[FORGOT_PASSWORD] SMTP config missing")
-                print(f"SMTP_SERVER: {SMTP_SERVER}")
-                print(f"SMTP_PORT: {SMTP_PORT}")
-                print(f"SMTP_EMAIL exists: {bool(SMTP_EMAIL)}")
-                print(f"SMTP_PASSWORD exists: {bool(SMTP_PASSWORD)}")
+            if not RESEND_API_KEY:
+                print("[FORGOT_PASSWORD] RESEND_API_KEY missing")
                 return False
 
-            subject = "Your ForecastAI Pro Password Reset Code"
-            body = f"""Hello,
+            subject = "Your AptStock Pro Password Reset Code"
+            html_content = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+                <h2>Password Reset Request</h2>
+                <p>Hello,</p>
+                <p>Use this 6-digit code to reset your password:</p>
+                <h1 style="letter-spacing: 4px; color: #4f46e5;">{otp_code}</h1>
+                <p>This code expires in 10 minutes.</p>
+                <p>Do not share this code with anyone.</p>
+                <p>If you did not request this, please ignore this email.</p>
+                <br>
+                <p>— AptStock Pro Team</p>
+            </div>
+            """
 
-    Use this 6-digit code to reset your ForecastAI Pro password:
+            response = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": FROM_EMAIL,
+                    "to": [email],
+                    "subject": subject,
+                    "html": html_content,
+                },
+                timeout=20,
+            )
 
-    {otp_code}
+            print(f"[FORGOT_PASSWORD] Resend status: {response.status_code}")
+            print(f"[FORGOT_PASSWORD] Resend body: {response.text}")
 
-    This code expires in 10 minutes.
-DO NOT share this code with anyone.
-
-If you didn't request this, please ignore this email.
-
----
-ForecastAI Pro Team
-"""
-
-            msg = MIMEText(body, "plain")
-            msg["From"] = SMTP_EMAIL
-            msg["To"] = email
-            msg["Subject"] = subject
-
-            print(f"[FORGOT_PASSWORD] sending OTP email to {email}")
-            print(f"[FORGOT_PASSWORD] SMTP server: {SMTP_SERVER}:{SMTP_PORT}")
-
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
-                server.starttls()
-                server.login(SMTP_EMAIL, SMTP_PASSWORD)
-                server.send_message(msg)
-
-            print(f"[FORGOT_PASSWORD] email sent successfully to {email}")
-            return True
+            return response.status_code in [200, 201]
 
         except Exception as e:
-            print(f"[FORGOT_PASSWORD] Email send failed: {type(e).__name__}: {e}")
+            print(f"[FORGOT_PASSWORD] Resend email failed: {type(e).__name__}: {e}")
             return False
-
+    
     @staticmethod
     def verify_and_reset_password(email: str, otp_code: str, new_password: str) -> Dict:
         """Verify OTP and reset password"""
