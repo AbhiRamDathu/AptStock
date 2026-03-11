@@ -211,8 +211,26 @@ async def refresh_token(refresh_token: str = Query(...)):
 @router.post("/forgot-password")
 async def forgot_password(request: PasswordResetRequest):
     """Request password reset OTP"""
-    result = AuthService.request_password_reset(request.email)
-    return result
+    try:
+        print(f"[FORGOT_PASSWORD_ROUTE] route hit for email: {request.email}")
+
+        result = AuthService.request_password_reset(request.email)
+
+        print(f"[FORGOT_PASSWORD_ROUTE] service result: {result}")
+
+        if not result:
+            raise HTTPException(status_code=500, detail="Empty response from password reset service")
+
+        if result.get("success") is False:
+            raise HTTPException(status_code=500, detail=result.get("error", "Password reset failed"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[FORGOT_PASSWORD_ROUTE] crash: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Forgot password failed")
 
 @router.post("/reset-password")
 async def reset_password(request: PasswordResetConfirm):
