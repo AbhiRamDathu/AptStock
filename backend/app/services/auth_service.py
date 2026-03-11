@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from email.mime.text import MIMEText
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "lingarajuvelishala11@gmail.com")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aptstock.pages.dev")
 
 
