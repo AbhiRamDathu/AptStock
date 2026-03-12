@@ -381,20 +381,8 @@ def extract_bearer_token(auth_header: Optional[str]) -> Optional[str]:
 def check_trial_status(func):
     """
     ✅ Decorator to check trial status on protected routes
-    
-    Usage:
-        @router.post("/upload-and-process")
-        @verify_token
-        @check_trial_status  # ← Add this line
-        async def upload_file(file: UploadFile, token: dict):
-            ...
-    
-    Returns:
-        - 200: User has active trial or paid subscription
-        - 402: Trial expired, show paywall
-        - 401: Token invalid
     """
-    
+    @wraps(func)
     async def wrapper(*args, **kwargs):
         # Extract token from kwargs
         token = kwargs.get('token')
@@ -419,24 +407,20 @@ def check_trial_status(func):
         # Check trial status
         trial_status, error_msg = TrialManager.check_trial_status(user_email)
 
-        # ✅ NEW: log the decision clearly
         logger.info(f"[TRIAL] Decorator check_trial_status → {trial_status} for {user_email}")
         
         if trial_status == "ALLOWED":
-            # User can proceed
             logger.info(f"✅ Trial check passed: {user_email}")
             return await func(*args, **kwargs)
         
-        else:
-            # Trial expired - return 402
-            logger.warning(f"🔒 Trial check failed: {user_email} - {error_msg}")
-            raise HTTPException(
-                status_code=402,  # Payment Required
-                detail=error_msg or "Trial expired. Please upgrade."
-            )
+        logger.warning(f"🔒 Trial check failed: {user_email} - {error_msg}")
+        raise HTTPException(
+            status_code=402,
+            detail=error_msg or "Trial expired. Please upgrade."
+        )
     
     return wrapper
-
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # ✅ NEW: Async wrapper for the decorator
 # ═══════════════════════════════════════════════════════════════════════════════

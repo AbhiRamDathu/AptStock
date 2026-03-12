@@ -149,7 +149,7 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @router.post("/preview")
-@check_trial_status
+@check_trial_status_async
 async def preview_csv(
     file: UploadFile = File(...),
     token: dict = Depends(verify_token)
@@ -552,6 +552,11 @@ async def upload_and_process_file(
                     "start": actual_start_date,
                     "end": actual_end_date,
                     'days_analyzed': actual_days
+                },
+                "forecast_horizon_days": 15,
+                "forecast_range": {
+                    "start": actual_end_date,
+                    "end": (pd.to_datetime(actual_end_date) + timedelta(days=15)).strftime("%Y-%m-%d")
                 },
                 'filtered_range_applied': {
                     'from_date': filter_from_date,
@@ -2378,7 +2383,7 @@ async def get_sample_data(token: dict = Depends(verify_token)):
 
 
 @router.post("/upload-and-process-sample")
-@check_trial_status
+@check_trial_status_async
 async def upload_and_process_sample(
     token: dict = Depends(verify_token),
     filter_from_date: Optional[str] = Query(None),
