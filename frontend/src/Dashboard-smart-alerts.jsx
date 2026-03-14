@@ -1207,10 +1207,27 @@ const handleLoadSampleData = async () => {
     setHasUploadedFile(true);
 
     if (response.summary && response.summary.date_range) {
-      setFilterFromDate(response.summary.date_range.start);
-      setFilterToDate(response.summary.date_range.end);
-    }
+  const fileEndDate = response.summary.date_range.end;
 
+  const lastDate = new Date(fileEndDate);
+
+  const forecastStart = new Date(lastDate);
+  forecastStart.setDate(lastDate.getDate() + 1);
+
+  const forecastEnd = new Date(lastDate);
+  forecastEnd.setDate(lastDate.getDate() + 15);
+
+  const formatDate = (date) => date.toISOString().split("T")[0];
+
+  setFilterFromDate(formatDate(forecastStart));
+  setFilterToDate(formatDate(forecastEnd));
+
+  console.log("✅ Sample forecast date range set:", {
+    historicalEnd: fileEndDate,
+    from: formatDate(forecastStart),
+    to: formatDate(forecastEnd),
+  });
+}
     setChartRefreshKey(prev => prev + 1);
     setForecastUpdateTrigger(prev => prev + 1);
     setFullRangeCoverageKey(prev => prev + 1);
@@ -5879,10 +5896,10 @@ const businessMetrics = calculateFileBasedROI();
             Special Launch Offer
           </div>
           <div style={{ fontSize: '48px', fontWeight: '900', marginBottom: '4px' }}>
-            ₹2,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
+            ₹1,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
           </div>
           <div style={{ fontSize: '14px', opacity: 0.9 }}>
-            <s>₹8,999/month</s> • Save 50% for first 3 months
+            <s>₹2,999/month</s> • Save 33% for first 2 months
           </div>
         </div>
 
@@ -6436,7 +6453,7 @@ const TrialPaywallModal = () => {
   const plans = [
     {
       name: 'STARTER',
-      monthlyPrice: '₹3,000',
+      monthlyPrice: '₹2,999',
       annualPrice: '₹30,000',
       savingsPercent: '17%',
       features: [
