@@ -12,7 +12,7 @@ from app.services.database_service import DatabaseService
 from datetime import datetime, timedelta
 
 from app.routes import forecast_routes, auth_routes 
-
+load_dotenv()
 
 # ========== SETUP ==========
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -21,8 +21,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ========== MONGODB ==========
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = (
+    os.getenv("MONGODB_URI")
+    or os.getenv("MONGO_URI")
+    or "mongodb://localhost:27017"
+)
 DATABASE_NAME = os.getenv("DATABASE_NAME", "apdf_io_mongo")
+print("SMTP_EMAIL:", os.getenv("SMTP_EMAIL"))
+print("SMTP_PASSWORD:", os.getenv("SMTP_PASSWORD"))
 
 mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
 db = mongo_client[DATABASE_NAME]

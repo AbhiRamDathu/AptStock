@@ -9,10 +9,10 @@ load_dotenv()
 class EmailService:
     """SMTP email service"""
 
-    SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-    SMTP_EMAIL = os.getenv("SMTP_EMAIL")
-    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+    SMTP_SERVER = (os.getenv("SMTP_SERVER") or "smtp.gmail.com").strip()
+    SMTP_PORT = int((os.getenv("SMTP_PORT") or "587").strip())
+    SMTP_EMAIL = (os.getenv("SMTP_EMAIL") or "").strip()
+    SMTP_PASSWORD = (os.getenv("SMTP_PASSWORD") or "").strip()
 
     @staticmethod
     def send_email(to_email: str, subject: str, html_content: str) -> bool:
@@ -30,6 +30,11 @@ class EmailService:
 
             html_part = MIMEText(html_content, "html")
             message.attach(html_part)
+
+            print(f"[EMAIL] SMTP_SERVER={EmailService.SMTP_SERVER}")
+            print(f"[EMAIL] SMTP_PORT={EmailService.SMTP_PORT}")
+            print(f"[EMAIL] SMTP_EMAIL={EmailService.SMTP_EMAIL}")
+            print(f"[EMAIL] SMTP_PASSWORD_PRESENT={bool(EmailService.SMTP_PASSWORD)}")
 
             with smtplib.SMTP(EmailService.SMTP_SERVER, EmailService.SMTP_PORT) as server:
                 server.starttls()
