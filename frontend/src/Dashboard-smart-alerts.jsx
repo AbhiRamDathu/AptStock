@@ -686,6 +686,8 @@ console.log('📊 Data Counts:', {
   priorityActions: mappedData.priorityActions.length
 });
 
+console.log('✅ Backend Response:', response);
+
 // Log sample data
 if (mappedData.historical.length > 0) {
   console.log('📊 Sample Historical:', mappedData.historical[0]);
@@ -1594,6 +1596,29 @@ const handleExportHistoricalData = () => {
   console.log('✅ Export complete:', filename);
 };
 
+const showPaymentQr = () => {
+  setModalTitle("Scan QR Code to Get Started");
+  setModalContent(
+    <div style={{ textAlign: "center", padding: "20px" }}>
+      <p style={{ fontSize: "16px", fontWeight: "600", marginBottom: "16px" }}>
+        Scan this QR code to continue
+      </p>
+
+      <img
+        src="upi-qr.jpeg"
+        alt="Payment QR Code"
+        style={{
+          width: 420, height: 550, borderRadius: 12
+        }}
+      />
+
+      <p style={{ fontSize: "14px", color: "#64748b", margin: 0 }}>
+        Complete the payment and contact us after payment confirmation.
+      </p>
+    </div>
+  );
+  setModalOpen(true);
+};
 
 
   const handleExportInventoryData = () => {
@@ -1647,26 +1672,28 @@ const handleExportHistoricalData = () => {
 
   try {
     const headers = [
-      'SKU',
-      'Item_Name',
-      'Priority_Level',
-      'Daily_Demand',
-      'Recommended_Qty',
-      'Revenue_Risk',
-      'ROI_Percent',
-      'Action_Summary'
-    ];
+  'SKU',
+  'Item_Name',
+  'Priority_Level',
+  'Daily_Demand',
+  'Recommended_Qty_7_Days',
+  'Recommended_Qty_15_Days',
+  'Revenue_Risk',
+  'ROI_Percent',
+  'Action_Summary'
+];
 
-    const csvRows = data.priorityActions.map(item => [
-      item.sku,
-      item.item_name || item.itemname || '',
-      item.priority_level || item.priority || item.risk_level || 'MEDIUM',
-      item.daily_demand || item.daily_sales_avg || 0,
-      item.recommended_qty || item.recommended_stock || 0,
-      item.revenue_risk || item.revenue_risk_rupees || 0,
-      item.roi_percent || item.roi || 0,
-      item.action_required || item.status || ''
-    ]);
+   const csvRows = data.priorityActions.map(item => [
+  item.sku,
+  item.item_name || item.itemname || '',
+  item.priority_level || item.priority || item.risk_level || 'MEDIUM',
+  item.daily_demand || item.daily_sales_avg || item.daily_sales || 0,
+  item.recommended_stock_7_days || 0,
+  item.recommended_stock_15_days || item.recommended_stock || 0,
+  item.revenue_risk || item.revenue_risk_rupees || 0,
+  item.roi_percent || item.roi || 0,
+  item.recommendedaction || item.description || item.action_required || item.status || ''
+]);
 
     const csvContent = [headers, ...csvRows]
       .map(row => row.join(','))
@@ -4188,7 +4215,14 @@ const businessMetrics = calculateFileBasedROI();
                                                                                       marginBottom: '6px',
                                                                                       fontWeight: '500'
                                                                                     }}>
-                                                                                      🚨 URGENT: immediately restock the Recommended Qty: {action.recommended_stock?.toLocaleString() || 'N/A'} units, Because of Daily Demand: {action.daily_sales?.toFixed(1) || 'N/A'} units/day
+                                                                                      <div>
+    📦 Next 7 days stock recommendation: <strong>{
+  action.recommended_stock_7_days != null
+    ? action.recommended_stock_7_days.toLocaleString()
+    : 'N/A'
+}</strong> units
+  </div>
+                                                                                      🚨 URGENT: Recommended demand for next 15 days: {action.recommended_stock?.toLocaleString() || 'N/A'} units, Because of Daily Demand: {action.daily_sales?.toFixed(1) || 'N/A'} units/day
                                                                                     </div>
                                                                                     <div style={{
                                                                                       fontSize: '12px',
@@ -5989,7 +6023,7 @@ const businessMetrics = calculateFileBasedROI();
         {/* CTA Buttons */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <button
-            
+            onClick={showPaymentQr}
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               color: 'white',

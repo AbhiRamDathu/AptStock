@@ -1,14 +1,12 @@
 import secrets
-import random, os, requests
-import smtplib
+import random, os
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from email.mime.text import MIMEText
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aptstock.pages.dev")
 
 
@@ -18,7 +16,7 @@ from app.config import (
     SMTP_EMAIL, SMTP_PASSWORD
 )
 from app.services.database_service import DatabaseService
-
+from app.services.emailServices import EmailService
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -200,12 +198,8 @@ class AuthService:
 
     @staticmethod
     def send_password_reset_otp_email(email: str, otp_code: str) -> bool:
-        """Send OTP email using Resend API"""
+        """Send password reset OTP email using SMTP only"""
         try:
-            if not RESEND_API_KEY:
-                print("[FORGOT_PASSWORD] RESEND_API_KEY missing")
-                return False
-
             subject = "Your AptStock Pro Password Reset Code"
             html_content = f"""
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
@@ -221,30 +215,19 @@ class AuthService:
             </div>
             """
 
-            response = requests.post(
-                "https://api.resend.com/emails",
-                headers={
-                    "Authorization": f"Bearer {RESEND_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "from": FROM_EMAIL,
-                    "to": [email],
-                    "subject": subject,
-                    "html": html_content,
-                },
-                timeout=20,
+            email_sent = EmailService.send_email(
+                to_email=email,
+                subject=subject,
+                html_content=html_content
             )
 
-            print(f"[FORGOT_PASSWORD] Resend status: {response.status_code}")
-            print(f"[FORGOT_PASSWORD] Resend body: {response.text}")
-
-            return response.status_code in [200, 201]
+            print(f"[FORGOT_PASSWORD] SMTP email_sent={email_sent} for: {email}")
+            return email_sent
 
         except Exception as e:
-            print(f"[FORGOT_PASSWORD] Resend email failed: {type(e).__name__}: {e}")
+            print(f"[FORGOT_PASSWORD] SMTP email failed: {type(e).__name__}: {e}")
             return False
-    
+
     @staticmethod
     def verify_and_reset_password(email: str, otp_code: str, new_password: str) -> Dict:
         """Verify OTP and reset password"""
