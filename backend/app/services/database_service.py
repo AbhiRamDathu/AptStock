@@ -47,7 +47,8 @@ class DatabaseService:
     def get_user_by_email(email: str) -> Optional[dict]:
         """Fetch user by email (safe)"""
         try:
-            user = users_collection.find_one({"email": email})
+            normalized_email = (email or "").strip().lower()
+            user = users_collection.find_one({"email": normalized_email})
             if user:
                 user["id"] = str(user["_id"])
                 del user["_id"]
@@ -55,7 +56,7 @@ class DatabaseService:
         except Exception as e:
             print(f"[DB] get_user_by_email failed: {type(e).__name__}: {e}")
             return None
-
+        
     @staticmethod
     def get_user_by_id(user_id: str) -> Optional[dict]:
         """Fetch user by ID"""
@@ -110,20 +111,28 @@ class DatabaseService:
     def set_reset_otp(email: str, otp_code: str, expiry: datetime) -> bool:
         """Store OTP and expiry on user document"""
         try:
+            normalized_email = (email or "").strip().lower()
+
             result = users_collection.update_one(
-                {"email": email},
+                {"email": normalized_email},
                 {"$set": {
                     "reset_otp": otp_code,
                     "reset_otp_expiry": expiry,
                     "reset_otp_used": False
                 }}
             )
-            print(f"[DEBUG] OTP stored for {email}: {otp_code} (modified: {result.modified_count})")
-            return True
-        except Exception as e:
-            print(f"[ERROR] Error storing OTP: {e}")
-            return False
 
+            print(
+                f"[DEBUG] OTP store result for {normalized_email}: "
+                f"matched={result.matched_count}, modified={result.modified_count}"
+            )
+
+            return result.matched_count == 1
+
+        except Exception as e:
+            print(f"[ERROR] Error storing OTP for {email}: {type(e).__name__}: {e}")
+            return False
+        
     @staticmethod
     def mark_reset_otp_used(email: str) -> bool:
         """Mark OTP as used"""

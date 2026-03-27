@@ -6,7 +6,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "aptstockapp@gmail.com")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://aptstock.pages.dev")
 
 
@@ -151,53 +151,58 @@ class AuthService:
 
     @staticmethod
     def request_password_reset(email: str) -> Dict:
-        """Request password reset: Generate OTP and send email"""
+        """Request password reset: generate OTP and attempt to send email"""
         try:
-            print(f"[FORGOT_PASSWORD] request started for: {email}")
+            normalized_email = (email or "").strip().lower()
+            print(f"[FORGOT_PASSWORD] request started for: {normalized_email}")
 
-            user = DatabaseService.get_user_by_email(email)
+            user = DatabaseService.get_user_by_email(normalized_email)
 
+            # Never reveal whether email exists
             if not user:
-                print(f"[FORGOT_PASSWORD] user not found for: {email}")
+                print(f"[FORGOT_PASSWORD] user not found for: {normalized_email}")
                 return {
                     "success": True,
                     "message": "If email exists, reset code sent"
                 }
 
-        # Generate OTP
             otp_code = "{:06d}".format(random.randint(0, 999999))
             expiry = datetime.utcnow() + timedelta(minutes=10)
 
-            print(f"[FORGOT_PASSWORD] OTP generated for: {email}")
+            print(f"[FORGOT_PASSWORD] OTP generated for: {normalized_email}")
 
-        # Store OTP
-            DatabaseService.set_reset_otp(email, otp_code, expiry)
-            print(f"[FORGOT_PASSWORD] OTP stored for: {email}")
+            otp_saved = DatabaseService.set_reset_otp(normalized_email, otp_code, expiry)
+            print(f"[FORGOT_PASSWORD] otp_saved={otp_saved} for: {normalized_email}")
 
-        # Send email
-            email_sent = AuthService.send_password_reset_otp_email(email, otp_code)
-            print(f"[FORGOT_PASSWORD] email_sent={email_sent} for: {email}")
-
-            if not email_sent:
+            if not otp_saved:
+                print(f"[FORGOT_PASSWORD] failed to store OTP for: {normalized_email}")
                 return {
-                    "success": False,
-                    "error": "Failed to send reset email"
+                    "success": True,
+                    "message": "If email exists, reset code sent"
                 }
+
+            email_sent = AuthService.send_password_reset_otp_email(normalized_email, otp_code)
+            print(f"[FORGOT_PASSWORD] email_sent={email_sent} for: {normalized_email}")
+
+            # Do not fail the API response if SMTP fails
+            if not email_sent:
+                print(f"[FORGOT_PASSWORD] SMTP failed for: {normalized_email}")
 
             return {
                 "success": True,
-                "message": "Reset code sent successfully"
+                "message": "If email exists, reset code sent"
             }
 
         except Exception as e:
             print(f"[FORGOT_PASSWORD] request_password_reset failed: {type(e).__name__}: {e}")
             return {
-                "success": False,
-                "error": "Password reset request failed"
+                "success": True,
+                "message": "If email exists, reset code sent"
             }
-
+    
     @staticmethod
     def send_password_reset_otp_email(email: str, otp_code: str) -> bool:
+        normalized_email = (email or "").strip().lower()
         """Send password reset OTP email using SMTP only"""
         try:
             subject = "Your AptStock Pro Password Reset Code"
@@ -216,7 +221,7 @@ class AuthService:
             """
 
             email_sent = EmailService.send_email(
-                to_email=email,
+                to_email=normalized_email,
                 subject=subject,
                 html_content=html_content
             )
@@ -230,9 +235,11 @@ class AuthService:
 
     @staticmethod
     def verify_and_reset_password(email: str, otp_code: str, new_password: str) -> Dict:
+        normalized_email = (email or "").strip().lower()
         """Verify OTP and reset password"""
         try:
-            user = DatabaseService.get_user_by_email(email)
+            
+            user = DatabaseService.get_user_by_email(normalized_email)
             if not user:
                 return {"success": False, "error": "Email not found"}
 
@@ -248,8 +255,8 @@ class AuthService:
 
             # Hash and update password
             password_hash = AuthService.hash_password(new_password)
-            DatabaseService.update_user_password(email, password_hash)
-            DatabaseService.mark_reset_otp_used(email)
+            DatabaseService.update_user_password(normalized_email, password_hash)
+            DatabaseService.mark_reset_otp_used(normalized_email)
 
 
             return {"success": True, "message": "Password reset successfully"}

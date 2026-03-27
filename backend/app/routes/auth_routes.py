@@ -218,19 +218,20 @@ async def forgot_password(request: PasswordResetRequest):
 
         print(f"[FORGOT_PASSWORD_ROUTE] service result: {result}")
 
-        if not result:
-            raise HTTPException(status_code=500, detail="Empty response from password reset service")
+        # Always return generic success to frontend
+        return {
+            "success": True,
+            "message": "If email exists, reset code sent"
+        }
 
-        if result.get("success") is False:
-            raise HTTPException(status_code=500, detail=result.get("error", "Password reset failed"))
-
-        return result
-
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"[FORGOT_PASSWORD_ROUTE] crash: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail="Forgot password failed")
+
+        # Still do not expose failure to frontend
+        return {
+            "success": True,
+            "message": "If email exists, reset code sent"
+        }
 
 @router.post("/reset-password")
 async def reset_password(request: PasswordResetConfirm):
