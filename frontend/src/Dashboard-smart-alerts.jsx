@@ -53,6 +53,8 @@ const Dashboard = () => {
     inventory: [],
     performance: [],
     priorityActions: [],
+    business_metrics: null,
+    business_insights: null,
     roiData: null
   });
 
@@ -226,13 +228,17 @@ const processCompleteDataWithFullRange = async (csvText, userFromDate, userToDat
     console.log('✅ Backend API response received:', response);
     
     // Extract backend response data
+    if (!response) {
+      throw new Error("Backend response is undefined");
+    }
+
     const {
       forecasts = [],
       inventory = [],
       priority_actions = [],
       roi = {},
       summary = {}
-    } = response;
+    } = response || {};
     
     // Map backend response to frontend state structure
     const mappedForecasts = forecasts.map(item => ({
@@ -258,6 +264,8 @@ const processCompleteDataWithFullRange = async (csvText, userFromDate, userToDat
         mae: f.model_performance.mae
       })),
       priorityActions: priority_actions,
+      business_metrics: response.business_metrics || null,
+      business_insights: response.business_insights || null,
       roiData: roi
     });
     
@@ -287,18 +295,20 @@ const processCompleteDataWithFullRange = async (csvText, userFromDate, userToDat
       itemCount: mappedForecasts.length, 
       recordCount: summary.total_records || 0,
       dateRange: `${userFromDate} to ${userToDate}`,
-      mappedData: {  // ✅ ADD THIS SECTION
-        historical: historical,
-        forecasts: mappedForecasts,
-        inventory: inventory,
-        priorityActions: priorityActions,
-        businessmetrics: response.businessmetrics,
-        roiData: response.roi,
-        dateRange: {
-            from: userFromDate,
-            to: userToDate
-        }
-    },
+    mappedData: {
+      historical: response.historical || [],
+      historical_raw: response.historical_raw || [],
+      forecasts: mappedForecasts,
+      inventory: inventory,
+      priorityActions: priority_actions,
+      business_metrics: response.business_metrics || null,
+      business_insights: response.business_insights || null,
+      roiData: response.roi || null,
+      dateRange: {
+        from: userFromDate,
+        to: userToDate
+      }
+    },  
       excelItems: uniqueItems,
       totalDaysCovered: totalDays,
       inventoryCount: inventory.length,
@@ -487,7 +497,8 @@ const handleApplyDateFilters = async () => {
     : [],
 
   // Business metrics
-  businessmetrics: response.business_metrics || null,
+  business_metrics: response.business_metrics || null,
+  business_insights: response.business_insights || null,
 
   // ROI
   roiData: response.roi || null,
@@ -607,8 +618,9 @@ const handleFileUpload = async (event) => {
         );
     
         console.log('✅ Backend Response:', response);
+        console.log('💰 Business Insights from backend:', response.business_insights);
     
-    setData(response.data);
+    setData(response);   // ✅ correct
     setHasUploadedFile(true);  // ✅ MAKE SURE THIS IS SET
     
     // ✅ Force component re-render
@@ -672,6 +684,8 @@ inventory: Array.isArray(response.inventory) && response.inventory.length > 0
   
   // Business metrics
   business_metrics: response.business_metrics || null,
+
+  business_insights: response.business_insights || null,
   
   // ROI
   roiData: response.roi || null
@@ -729,6 +743,7 @@ console.log('✅ Mapped Data Result:', {
 
       // ✅ Update the MAIN data object
       setData(mappedData);
+      console.log('✅ Final mapped business_insights:', mappedData.business_insights);
 
       // ✅ Also set individual state variables (for backward compatibility)
       if (response.business_metrics) {
@@ -1969,6 +1984,10 @@ const businessMetrics = calculateFileBasedROI();
     navigate('/login');
   };
 
+  // ✅ Business metrics honesty flags
+const hasRealRevenue = !!data?.business_metrics?.has_real_revenue;
+const metricWarning = data?.business_metrics?.metric_warning;
+
   // Your existing dashboard code...
 
   
@@ -3171,6 +3190,22 @@ const businessMetrics = calculateFileBasedROI();
                  
                         
                                   {/* ✅ UPDATED: Business Metrics based on calculate_business_metrics() */}
+
+                                  {hasUploadedFile && data?.business_metrics && !hasRealRevenue && (
+  <div style={{
+    backgroundColor: '#fff7ed',
+    border: '1px solid #fdba74',
+    color: '#9a3412',
+    padding: '12px 16px',
+    borderRadius: '10px',
+    marginBottom: '16px',
+    fontSize: '14px',
+    fontWeight: '500'
+  }}>
+    ⚠️ Revenue metrics require price or revenue columns in the uploaded file.
+    This upload currently supports quantity-based analysis, but money metrics are hidden to avoid misleading results.
+  </div>
+)}
 {hasUploadedFile && data.business_metrics && (
   <div style={{
     display: 'grid',
@@ -3193,7 +3228,9 @@ const businessMetrics = calculateFileBasedROI();
         color: '#22c55e',
         marginBottom: '8px'
       }}>
-        ₹{data?.business_metrics?.total_revenue?.toLocaleString() || '0'}
+        {hasRealRevenue
+  ? `₹${data.business_metrics.total_revenue.toLocaleString()}`
+  : 'N/A'}
       </div>
       <div style={{
         fontSize: '16px',
@@ -3215,7 +3252,9 @@ const businessMetrics = calculateFileBasedROI();
         marginTop: '8px',
         fontWeight: '600'
       }}>
-        ₹{data?.business_metrics?.avg_daily_revenue?.toLocaleString() || '0'} avg. daily
+        {hasRealRevenue
+  ? `₹${data?.business_metrics?.avg_daily_revenue?.toLocaleString() || '0'} avg. daily`
+  : 'Revenue data unavailable'}
       </div>
       <div style={{
         fontSize: '10px',
@@ -3255,7 +3294,9 @@ const businessMetrics = calculateFileBasedROI();
         fontSize: '12px',
         color: '#6b7280'
       }}>
-        Comparing first vs. second half of period
+        {hasRealRevenue
+  ? 'Comparing first vs. second half revenue'
+  : 'Unavailable without price/revenue data'}
       </div>
       <div style={{
         fontSize: '11px',
@@ -3289,7 +3330,9 @@ const businessMetrics = calculateFileBasedROI();
         color: '#3b82f6',
         marginBottom: '8px'
       }}>
-        ₹{data.business_metrics.avg_transaction_value.toLocaleString()}
+       {hasRealRevenue
+  ? `₹${data.business_metrics.avg_transaction_value.toLocaleString()}`
+  : 'Price/revenue column required'}
       </div>
       <div style={{
         fontSize: '16px',
@@ -3303,7 +3346,7 @@ const businessMetrics = calculateFileBasedROI();
         fontSize: '12px',
         color: '#6b7280'
       }}>
-        {data.business_metrics.avg_units_per_transaction.toFixed(1)} units per transaction
+        ₹{data.business_metrics.avg_transaction_value.toLocaleString()} per transaction
       </div>
       <div style={{
         fontSize: '11px',
@@ -3337,9 +3380,9 @@ const businessMetrics = calculateFileBasedROI();
         color: '#f59e0b',
         marginBottom: '8px'
       }}>
-        {data.business_metrics.top_products && data.business_metrics.top_products.length > 0 
-          ? data.business_metrics.top_products[0].percentage + '%'
-          : 'N/A'}
+        {hasRealRevenue && data.business_metrics.top_products?.length > 0
+  ? `${data.business_metrics.top_products[0].percentage}%`
+  : 'N/A'}
       </div>
       <div style={{
         fontSize: '16px',
@@ -3356,9 +3399,9 @@ const businessMetrics = calculateFileBasedROI();
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap'
       }}>
-        {data.business_metrics.top_products && data.business_metrics.top_products.length > 0 
-          ? data.business_metrics.top_products[0].name
-          : 'No data'}
+        {hasRealRevenue && data.business_metrics.top_products?.length > 0
+  ? data.business_metrics.top_products?.[0].name
+  : 'Revenue data unavailable'}
       </div>
       <div style={{
         fontSize: '11px',
@@ -3366,7 +3409,9 @@ const businessMetrics = calculateFileBasedROI();
         marginTop: '8px',
         fontWeight: '600'
       }}>
-        ₹{data.business_metrics.revenue_per_product.toLocaleString()} per product
+        {hasRealRevenue
+  ? `₹${data.business_metrics.top_products[0].revenue.toLocaleString()}`
+  : 'Revenue data unavailable'}
       </div>
       <div style={{
         fontSize: '10px',
@@ -3376,6 +3421,121 @@ const businessMetrics = calculateFileBasedROI();
         Top 5 products analyzed
       </div>
     </div>
+  </div>
+)}
+{/* 🚀 AI Business Insights */}
+{hasUploadedFile &&
+ data?.business_insights &&
+ (data.business_insights.has_profit_data || data.business_insights.has_stock_data) && (
+  <div style={{
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '20px',
+    marginBottom: '24px'
+  }}>
+
+    {/* Estimated Profit */}
+    <div style={{
+      backgroundColor: '#ecfdf5',
+      padding: '24px',
+      borderRadius: '12px',
+      textAlign: 'center',
+      border: '1px solid #bbf7d0',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.06)'
+    }}>
+      <div style={{
+        fontSize: '28px',
+        fontWeight: '800',
+        color: '#059669'
+      }}>
+        ₹{(data.business_insights?.total_profit || 0).toLocaleString()}
+        <ProfitCrad/>
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937'
+      }}>
+        Estimated Profit
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        Based on uploaded file revenue and cost data
+      </div>
+    </div>
+
+    {/* Stockout Loss */}
+    <div style={{
+      backgroundColor: '#fff7ed',
+      padding: '24px',
+      borderRadius: '12px',
+      textAlign: 'center',
+      border: '1px solid #fdba74',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.06)'
+    }}>
+      <div style={{
+        fontSize: '28px',
+        fontWeight: '800',
+        color: '#ea580c'
+      }}>
+        ₹{(data.business_insights?.stockout_loss || 0).toLocaleString()}
+        <StockLossCard />
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937'
+      }}>
+        Loss Due to Stockouts
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        7-day loss estimate from current stock position
+      </div>
+    </div>
+
+    {/* AI Value */}
+    <div style={{
+      backgroundColor: '#eff6ff',
+      padding: '24px',
+      borderRadius: '12px',
+      textAlign: 'center',
+      border: '1px solid #93c5fd',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.06)'
+    }}>
+      <div style={{
+        fontSize: '28px',
+        fontWeight: '800',
+        color: '#2563eb'
+      }}>
+        ₹{(data.business_insights?.ai_value || 0).toLocaleString()}
+        <AIValueCard />
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '16px',
+        fontWeight: '600',
+        color: '#1f2937'
+      }}>
+        AI Value Generated
+      </div>
+      <div style={{
+        marginTop: '6px',
+        fontSize: '12px',
+        color: '#6b7280'
+      }}>
+        Estimated business value from recommendations
+      </div>
+    </div>
+
   </div>
 )}
 
@@ -4216,12 +4376,16 @@ const businessMetrics = calculateFileBasedROI();
                                                                                       fontWeight: '500'
                                                                                     }}>
                                                                                       <div>
-    📦 Next 7 days stock recommendation: <strong>{
-  action.recommended_stock_7_days != null
-    ? action.recommended_stock_7_days.toLocaleString()
-    : 'N/A'
-}</strong> units
-  </div>
+  📦 Next 7 days stock recommendation: <strong>{
+    action.recommended_stock_7_days != null
+      ? Number(action.recommended_stock_7_days).toLocaleString()
+      : (
+          action.recommendedaction?.match(/next 7 days:\s*([0-9.]+)/i)?.[1]
+            ? Number(action.recommendedaction.match(/next 7 days:\s*([0-9.]+)/i)[1]).toLocaleString()
+            : 'N/A'
+        )
+  }</strong> units
+</div>
                                                                                       🚨 URGENT: Recommended demand for next 15 days: {action.recommended_stock?.toLocaleString() || 'N/A'} units, Because of Daily Demand: {action.daily_sales?.toFixed(1) || 'N/A'} units/day
                                                                                     </div>
                                                                                     <div style={{

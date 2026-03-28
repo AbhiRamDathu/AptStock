@@ -72,24 +72,39 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
     
     # Step 2: Map common column name variations
     column_mapping = {
-        # Product/Item columns
-        'product': 'itemname',
-        'product_name': 'itemname',
-        'productname': 'itemname',
-        'item': 'itemname',
-        'item_name': 'itemname',
-        
-        # Quantity columns  
-        'qty': 'quantity',
-        'units': 'quantity',
-        'units_sold': 'quantity',
-        
-        # Date columns
-        'transaction_date': 'date',
-        'sale_date': 'date',
-        'order_date': 'date',
-    }
-    
+    # Product
+    'product': 'itemname',
+    'product_name': 'itemname',
+    'productname': 'itemname',
+    'item': 'itemname',
+    'item_name': 'itemname',
+
+    # Quantity
+    'qty': 'quantity',
+    'units': 'quantity',
+    'units_sold': 'quantity',
+
+    # Date
+    'transaction_date': 'date',
+    'sale_date': 'date',
+    'order_date': 'date',
+
+    # ✅ ADD THIS (VERY IMPORTANT)
+    # Price columns
+    'price': 'unit_price',
+    'unitprice': 'unit_price',
+    'selling_price': 'unit_price',
+    'sale_price': 'unit_price',
+    'rate': 'unit_price',
+
+    # Revenue columns
+    'amount': 'line_revenue',
+    'total': 'line_revenue',
+    'line_total': 'line_revenue',
+    'sales_amount': 'line_revenue',
+    'revenue': 'line_revenue',
+    'final_amount': 'line_revenue'
+}
     df = df.rename(columns=column_mapping)
     
     logger.info(f"📋 After mapping: {list(df.columns)}")
@@ -138,6 +153,12 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
     df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
     df = df.dropna(subset=['quantity'])
     df = df[df['quantity'] > 0]
+
+    # ✅ AUTO-CREATE REVENUE IF MISSING
+    if 'line_revenue' not in df.columns and 'unit_price' in df.columns:
+        df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
+        df['line_revenue'] = df['quantity'] * df['unit_price']
+        logger.info("✅ Created line_revenue from quantity × unit_price")
     
     logger.info(f"✅ CSV normalized successfully:")
     logger.info(f"   - {len(df)} rows")
@@ -472,6 +493,55 @@ async def upload_and_process_file(
             # Business Metrics
             logger.info("💼 Business Metrics...")
             business_metrics = calculate_business_metrics_v2(df_filtered, sales_column)
+
+            # ============================
+# 💰 PROFIT ESTIMATION
+# ============================
+
+            total_profit = None
+            has_profit_data = False
+
+            if 'line_revenue' in df_filtered.columns and unit_cost_dict:
+                df_profit = df_filtered.copy()
+
+                df_profit['unit_cost'] = pd.to_numeric(
+                    df_profit['sku'].map(unit_cost_dict), errors='coerce'
+                ).fillna(0)
+
+                df_profit['profit'] = df_profit['line_revenue'] - (df_profit['quantity'] * df_profit['unit_cost'])
+
+                total_profit = float(df_profit['profit'].sum())
+                has_profit_data = True
+
+
+# ============================
+# ⚠️ STOCKOUT LOSS
+# ============================
+
+            stockout_loss = None
+            has_stock_data = False
+
+            if current_stock_dict and unit_price_dict:
+                stockout_loss = 0
+                has_stock_data = True
+
+                for item in inventory_list:
+                    current_stock = float(item.get('current_stock') or 0)
+                    daily_demand = float(item.get('daily_sales_avg') or 0)
+                    unit_price = float(unit_price_dict.get(item.get('sku')) or 0)
+
+                    if current_stock <= 0:
+                        stockout_loss += daily_demand * unit_price * 7
+
+
+# ============================
+# 🤖 AI VALUE
+# ============================
+
+            ai_value = None
+
+            if has_profit_data or has_stock_data:
+                ai_value = (total_profit or 0) * 0.15 + (stockout_loss or 0)
             
             # ROI
             logger.info("💰 ROI Calculation...")
@@ -577,6 +647,15 @@ async def upload_and_process_file(
                 "user": user_email,
                 "sales_column_used": sales_column,
             },
+
+            "business_insights": {
+                "total_profit": _safe_number(total_profit, 0),
+                "stockout_loss": _safe_number(stockout_loss, 0),
+                "ai_value": _safe_number(ai_value, 0),
+                "has_profit_data": has_profit_data,
+                "has_stock_data": has_stock_data
+            },
+
             "historical": historical_data,
             "historical_raw": historical_raw,
             "business_metrics": business_metrics,
@@ -1702,7 +1781,13 @@ def generate_inventory_real_from_file(
                 int(z_score * std_dev * math.sqrt(lead_time_days)),
                 int(daily_avg * 2)
             )
-            recommended_stock = int(daily_avg * 15) + safety_stock
+            # Multi-horizon recommendations
+            recommended_stock_7_days = int(daily_avg * 7) + safety_stock
+            recommended_stock_15_days = int(daily_avg * 15) + safety_stock
+
+# Backward compatibility
+            recommended_stock = recommended_stock_15_days
+
             reorder_point = safety_stock + int(daily_avg * lead_time_days)
             
             # Financial calculations
@@ -1754,7 +1839,9 @@ def generate_inventory_real_from_file(
                 "priority_category": row['priority_category'],
                 
                 # Stock calculations
-                "recommended_stock": recommended_stock,
+                "recommended_stock_7_days": recommended_stock_7_days,
+                "recommended_stock_15_days": recommended_stock_15_days,
+                "recommended_stock": recommended_stock_15_days,
                 "safety_stock": safety_stock,
                 "reorder_point": reorder_point,
                 
@@ -1921,7 +2008,17 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
             # ================================================================
             
             current_stock = _safe_number(item.get('current_stock', 0))
-            recommended_stock = _safe_number(item.get('recommended_stock', 100), 100)
+            recommended_stock_7_days = _safe_number(
+                item.get('recommended_stock_7_days', 0),
+                0
+            )
+            recommended_stock_15_days = _safe_number(
+                item.get('recommended_stock_15_days', item.get('recommended_stock', 100)),
+                100
+            )
+
+            # Backward compatibility
+            recommended_stock = recommended_stock_15_days
             daily_sales_avg = _safe_number(item.get('daily_sales_avg', 0))
             daily_sales_std = _safe_number(item.get('daily_sales_std', 0))
             unit_cost = _safe_number(item.get('unit_cost', 100), 100)
@@ -2116,7 +2213,9 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
     
     # ✅ Stock Data (MATCHES FRONTEND)
                 'current_stock': round(current_stock, 1),
-                'recommended_stock': round(recommended_stock, 1),
+                'recommended_stock_7_days': round(recommended_stock_7_days, 1),
+                'recommended_stock_15_days': round(recommended_stock_15_days, 1),
+                'recommended_stock': round(recommended_stock_15_days, 1),
                 'shortage': round(shortage_units, 1),
                 'stock_percentage': round(stock_percentage, 1),
             'stock_status': 'Critical' if stock_percentage <= 25 else (
@@ -2237,92 +2336,152 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
 # BUSINESS METRICS V2
 # ============================================================================
 
-def calculate_business_metrics_v2(df: pd.DataFrame, sales_column: str, filter_from_date: str = None, filter_to_date: str = None) -> dict:
-    """Calculate comprehensive business metrics"""
-
-# ✅ ADD THESE LINES RIGHT AFTER FUNCTION DEFINITION
-    if filter_from_date:
-        filter_from_date_dt = pd.to_datetime(filter_from_date)
-        df = df[df['date'] >= filter_from_date_dt]
-    
-    if filter_to_date:
-        filter_to_date_dt = pd.to_datetime(filter_to_date)
-        df = df[df['date'] <= filter_to_date_dt]
-
-        if df.empty:
-            logger.warning(f"⚠️ No data in business metrics date range")
-        return {
-            'total_revenue': 0,
-            'total_transactions': 0,
-            'unique_products': 0,
-            'avg_daily_revenue': 0,
-            'avg_transaction_value': 0,
-            'avg_units_per_transaction': 0,
-            'growth_rate': 0,
-            'days_analyzed': 0,
-            'date_range': {'start': filter_from_date, 'end': filter_to_date},
-            'top_products': [],
-            'revenue_per_product': 0,
-            'transactions_per_day': 0
-        }
+def calculate_business_metrics_v2(
+    df: pd.DataFrame,
+    sales_column: str,
+    filter_from_date: str = None,
+    filter_to_date: str = None
+) -> dict:
+    """Calculate business metrics only from actual uploaded file revenue data"""
 
     try:
+        df = df.copy()
+
+        if filter_from_date:
+            filter_from_date_dt = pd.to_datetime(filter_from_date)
+            df = df[df['date'] >= filter_from_date_dt]
+
+        if filter_to_date:
+            filter_to_date_dt = pd.to_datetime(filter_to_date)
+            df = df[df['date'] <= filter_to_date_dt]
+
+        if df.empty:
+            return {
+                'has_real_revenue': False,
+                'metric_warning': 'No uploaded data in selected date range',
+                'revenue_source': 'none',
+                'total_revenue': 0,
+                'avg_daily_revenue': 0,
+                'growth_rate': 0,
+                'avg_transaction_value': 0,
+                'top_products': [],
+                'revenue_per_product': 0,
+                'avg_units_per_transaction': 0,
+                'transactions_per_day': 0,
+                'total_transactions': 0,
+                'unique_products': 0,
+                'days_analyzed': 0,
+                'date_range': {'start': None, 'end': None}
+            }
+
         total_records = len(df)
-        total_revenue = float(df[sales_column].sum())
         unique_products = df['sku'].nunique()
-        
+
         date_min = df['date'].min()
         date_max = df['date'].max()
         days_span = (date_max - date_min).days + 1
-        
+
+        avg_units_per_transaction = float(df[sales_column].mean()) if total_records > 0 else 0
+        transactions_per_day = total_records / max(days_span, 1)
+
+        revenue_source = 'none'
+
+        if 'line_revenue' in df.columns and df['line_revenue'].notna().any():
+            revenue_series = pd.to_numeric(df['line_revenue'], errors='coerce').fillna(0)
+            revenue_source = 'line_revenue'
+
+        elif 'unit_price' in df.columns and df['unit_price'].notna().any():
+            unit_price_series = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
+            revenue_series = df[sales_column].fillna(0) * unit_price_series
+            revenue_source = 'unit_price_x_quantity'
+
+        else:
+            revenue_series = pd.Series(0.0, index=df.index)
+            revenue_source = 'none'
+
+        has_real_revenue = revenue_source != 'none'
+        if not has_real_revenue:
+            logger.warning("⚠️ No revenue columns found — returning safe metrics")
+        total_revenue = float(revenue_series.sum())
         avg_daily_revenue = total_revenue / max(days_span, 1)
         avg_transaction_value = total_revenue / total_records if total_records > 0 else 0
-        avg_units_per_transaction = df[sales_column].mean()
-        
-        # Growth rate
+
         midpoint = date_min + pd.Timedelta(days=days_span // 2)
-        first_half = df[df['date'] < midpoint][sales_column].sum()
-        second_half = df[df['date'] >= midpoint][sales_column].sum()
-        growth_rate = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0.0
-        
-        # Top products
-        item_col = 'itemname'
-        top_products = df.groupby(['sku', item_col])[sales_column].sum().reset_index()
-        top_products = top_products.sort_values(sales_column, ascending=False).head(5)
-        
-        top_products_list = [
-            {
-                'sku': str(row['sku']),
-                'name': str(row[item_col]),
-                'revenue': float(row[sales_column]),
-                'percentage': round((float(row[sales_column]) / total_revenue * 100), 2)
-            }
-            for _, row in top_products.iterrows()
-        ]
-        
+
+        if has_real_revenue:
+            temp_df = df.copy()
+            temp_df['computed_revenue'] = revenue_series
+
+            first_half = temp_df[temp_df['date'] < midpoint]['computed_revenue'].sum()
+            second_half = temp_df[temp_df['date'] >= midpoint]['computed_revenue'].sum()
+
+            growth_rate = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0.0
+
+            top_products_df = (
+                temp_df.groupby(['sku', 'itemname'])['computed_revenue']
+                .sum()
+                .reset_index()
+                .sort_values('computed_revenue', ascending=False)
+                .head(5)
+            )
+
+            top_products = [
+                {
+                    'sku': str(row['sku']),
+                    'name': str(row['itemname']),
+                    'revenue': float(row['computed_revenue']),
+                    'percentage': round((float(row['computed_revenue']) / total_revenue * 100), 2) if total_revenue > 0 else 0
+                }
+                for _, row in top_products_df.iterrows()
+            ]
+
+            revenue_per_product = round(total_revenue / unique_products, 2) if unique_products > 0 else 0
+
+        else:
+            growth_rate = 0.0
+            top_products = []
+            revenue_per_product = 0
+
         return {
+            'has_real_revenue': has_real_revenue,
+            'metric_warning': None if has_real_revenue else 'Revenue metrics require uploaded unit_price or line_revenue column',
+            'revenue_source': revenue_source,
             'total_revenue': _safe_number(round(total_revenue, 2), 0),
+            'avg_daily_revenue': _safe_number(round(avg_daily_revenue, 2), 0),
+            'growth_rate': _safe_number(round(growth_rate, 2), 0),
+            'avg_transaction_value': _safe_number(round(avg_transaction_value, 2), 0),
+            'top_products': top_products,
+            'revenue_per_product': _safe_number(revenue_per_product, 0),
+            'avg_units_per_transaction': _safe_number(round(avg_units_per_transaction, 2), 0),
+            'transactions_per_day': _safe_number(round(transactions_per_day, 2), 0),
             'total_transactions': int(total_records),
             'unique_products': int(unique_products),
-            'avg_daily_revenue': _safe_number(round(avg_daily_revenue, 2), 0),
-            'avg_transaction_value': _safe_number(round(avg_transaction_value, 2), 0),
-            'avg_units_per_transaction': _safe_number(round(avg_units_per_transaction, 2), 0),
-            'growth_rate': _safe_number(round(growth_rate, 2), 0),
             'days_analyzed': int(days_span),
             'date_range': {
-                'start': date_min.strftime('%Y-%m-%d') if not filter_from_date else filter_from_date,
-                'end': date_max.strftime('%Y-%m-%d')if not filter_to_date else filter_to_date
-            },
-            'top_products': top_products_list,
-            'revenue_per_product': _safe_number(round(total_revenue / unique_products, 2) if unique_products > 0 else 0, 0),
-        'transactions_per_day': _safe_number(round(total_records / max(days_span, 1), 2), 0)
-    }
-        
+                'start': date_min.strftime('%Y-%m-%d'),
+                'end': date_max.strftime('%Y-%m-%d')
+            }
+        }
+
     except Exception as e:
         logger.error(f"❌ Business metrics error: {str(e)}")
-        return {}
-
-
+        return {
+            'has_real_revenue': False,
+            'metric_warning': str(e),
+            'revenue_source': 'error',
+            'total_revenue': 0,
+            'avg_daily_revenue': 0,
+            'growth_rate': 0,
+            'avg_transaction_value': 0,
+            'top_products': [],
+            'revenue_per_product': 0,
+            'avg_units_per_transaction': 0,
+            'transactions_per_day': 0,
+            'total_transactions': 0,
+            'unique_products': 0,
+            'days_analyzed': 0,
+            'date_range': {'start': None, 'end': None}
+        }
 # ============================================================================
 # ROI V2
 # ============================================================================

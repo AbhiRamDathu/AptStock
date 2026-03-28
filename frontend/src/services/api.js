@@ -187,7 +187,7 @@ uploadAndProcess: async (file, fromDate, toDate, selectedStore = 'Store A', thre
     formData.append('file', file);
 
 
-    if (costData) {
+    if (costData && typeof costData === 'object') {
       formData.append('unit_cost_dict', JSON.stringify(costData.unit_cost_dict || {}));
       formData.append('unit_price_dict', JSON.stringify(costData.unit_price_dict || {}));
       formData.append('current_stock_dict', JSON.stringify(costData.current_stock_dict || {}));
