@@ -803,7 +803,7 @@ console.log('✅ Mapped Data Result:', {
       const recordCount = response.total_records || response.summary?.totalrecords || 'your';
       setUploadStatus({
         type: 'success',
-        message: `✅ Processed ${recordCount} records successfully!`
+        message: `✅ Your insights are ready — start optimizing your stock decisions!`
       });
 
       setProcessingStage('complete');
@@ -877,7 +877,7 @@ const showROICalculator = () => {
           📁 Please upload your sales data first to calculate your personalized ROI.
         </p>
         <p style={{ fontSize: "14px", color: "#64748b" }}>
-          The AI-powered calculator analyzes your actual sales patterns, inventory levels, 
+          The powered calculator analyzes your actual sales patterns, inventory levels, 
           and historical trends to show your projected return on investment.
         </p>
       </div>
@@ -924,7 +924,7 @@ const showROICalculator = () => {
       <div style={{ marginBottom: "20px" }}>
         <h4 style={{ marginBottom: "8px", color: "#1f2937" }}>📈 Investment</h4>
         <p style={{ margin: "4px 0" }}>
-          <strong>ForecastAI Pro Cost:</strong> ₹{(roi.cost || roi.subscription_cost || 5000).toLocaleString()}/month
+          <strong>AptStock Pro Cost:</strong> ₹{(roi.cost || roi.subscription_cost || 5000).toLocaleString()}/month
         </p>
         <p style={{ margin: "4px 0", fontSize: "18px", fontWeight: "700", color: "#059669" }}>
           <strong>Net ROI:</strong> {roi.netROI || roi.net_roi || "5-8x"} monthly return! 🚀
@@ -1099,7 +1099,7 @@ const handleWatchVideo = () => {
   setModalContent(
     <div style={{ textAlign: "left" }}>
       <h4 style={{ marginTop: "0", color: "#1f2937" }}>
-        See ForecastAI Pro in Action:
+        See AptStock Pro in Action:
       </h4>
       <ul style={{ 
         lineHeight: "1.8", 
@@ -2074,7 +2074,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           color: '#15803d',
           letterSpacing: '0.2px'
         }}>
-          Trusted by 500+ Retailers
+          Powered by real Assistant
         </span>
       </div>
 
@@ -2256,7 +2256,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
               margin: '0 0 20px 0',
               lineHeight: '1.1'
             }}>
-             Smart Stock Planning That Increases Revenue by 15%
+             Smart Stock Planning That Increases Revenue 
             </h2>
             
             <p style={{
@@ -2266,8 +2266,8 @@ const metricWarning = data?.business_metrics?.metric_warning;
               fontWeight: '500',
               lineHeight: '1.4'
             }}>
-              Join 500+ retailers using our intelligent stock assistant and grow profits, 
-              reduce stockouts, and boost profitability with enterprise-grade stock planning.
+              Designed for retailers to reduce stockouts & grow profits, 
+              improve product availability, boost profitability, manage inventory with clarity and confidence.
             </p>
 
             {/* Customer Logos */}
@@ -2282,10 +2282,10 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 fontWeight: '600',
                 opacity: '0.9'
               }}>
-                Trusted by:
+                Powered by:
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-                {['Walmart', 'Target', 'Costco', 'Best Buy', 'Home Depot'].map((company, index) => (
+                {['Prophecy', 'Optimize', 'Demand', 'Analysis', 'Projection'].map((company, index) => (
                   <div key={index} style={{
                     backgroundColor: 'rgba(255, 255, 255, 0.15)',
                     padding: '8px 16px',
@@ -2467,19 +2467,19 @@ const metricWarning = data?.business_metrics?.metric_warning;
         }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>15%</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Average Revenue Increase</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Efficiency Potential Range</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>500+</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Retailers Trust Us</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Product Capacity Supported</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>99.2%</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Intelligent Accuracy</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>System Stability Indicator</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>₹2M+</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Revenue Generated</div>
+            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Inventory Value Capacity</div>
           </div>
         </div>
       </div>
@@ -2576,7 +2576,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
             </div>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '18px', marginBottom: '4px' }}>👥</div>
-              <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>Join 500+ retailers already optimizing</div>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>Upload your data to generate actionable insights</div>
             </div>
           </div>
         </div>
@@ -2691,7 +2691,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   'SKU/Product ID column',
                   'Store/Location column',
                   'Units sold column',
-                  'Minimum 14 days of data',
+                  'Minimum 25 days of data',
                   'No missing critical values'
                 ].map((requirement, index) => (
                   <div key={index} style={{
@@ -2775,11 +2775,11 @@ const metricWarning = data?.business_metrics?.metric_warning;
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '20px', marginBottom: '8px' }}>📊</div>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>Processing 10M+ Records Daily</div>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>Handles Large Data Volumes</div>
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '20px', marginBottom: '8px' }}>⚡</div>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>99.9% Uptime Guarantee</div>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>High System Availability</div>
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '20px', marginBottom: '8px' }}>🇪🇺</div>
@@ -2807,7 +2807,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 fontSize: '12px',
                 fontWeight: '600'
               }}>
-                Customer Success Story
+                Retailer Feedback
               </div>
               <div style={{
                 fontSize: '16px',
@@ -2816,15 +2816,15 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 marginBottom: '12px',
                 lineHeight: '1.4'
               }}>
-                "Smart stock planning increased our revenue efficiency by 23% and reduced stockouts by 67%. 
-                The ROI was visible within the first month!"
+                "AptStock transforms uploaded sales data into clear demand insights and stock risk alerts.
+It enables smarter, data-driven inventory decisions from day one."
               </div>
               <div style={{
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#1e40af'
               }}>
-                - Sarah Chen, Operations Manager at RetailMax
+                - Operations Manager at RetailStore
               </div>
             </div>
           </div>
@@ -2886,7 +2886,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   fontWeight: '600',
                   color: '#15803d'
                 }}>
-                  Builds IN Trust
+                  Recommended Settings Applied
                 </div>
               </div>
             </div>
@@ -2910,7 +2910,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   transition: 'all 0.2s ease'
                 }}
               >
-                {loading ? '⏳ Generating Forecast...' : '🤖 Generate Planning for Date Range'}
+                {loading ? '⏳ Generating Forecast...' : '🤖 Generate Stock Plan for Date Range'}
               </button>
             </div>
 
@@ -3304,7 +3304,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
         marginTop: '8px',
         fontWeight: '600'
       }}>
-        {data.business_metrics.growth_rate >= 0 ? '📈 Trending Up' : '📉 Needs Attention'}
+        {data.business_metrics.growth_rate >= 0 ? '📈 Trending Up' : '📉 Revenue declining — review stock strategy'}
       </div>
       <div style={{
         fontSize: '10px',
@@ -3572,7 +3572,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
   )}
 </h3>
 <div style={{ fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
-  Based on {data.filterMetadata?.recordsAnalyzed || 0} records
+  Based on your uploaded data
   {data.filterMetadata?.recordsRemoved > 0 && (
     <span style={{ color: '#ef4444' }}>
       {' '}({data.filterMetadata.recordsRemoved} removed by filter)
@@ -3586,7 +3586,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                                                                                                                            fontWeight: '500',
                                                                                                                            marginTop: '5px',
                                                                                                                          }}>
-                                                                                                                           Based on proprietary In algorithms • Confidence: 94.2% | Using In Powered Algorithm
+                                                                                                                           Based on proprietary In algorithms •  Data-driven analysis using internal algorithms
                                                                                                                          </div>
 
 <div  style={{fontSize: '14 px', marginTop: '-2px'}}/>
@@ -3648,7 +3648,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                                        cursor: 'pointer'
                                      }}
                                    >
-                                     Explanation
+                                     View Insights
                                    </button>
                                    
                                                                                                                        </div>
@@ -3738,7 +3738,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           gap: '6px'
         }}>
           <span>🔥</span>
-          <span>Prevision change with date range selection • Model validation: 94.2% • Date-responsive patterns</span>
+          <span>Adapts to selected date range • Validated using historical sales patterns</span>
         </div>
       </div>
 
@@ -3792,7 +3792,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           onMouseOut={(e) => e.target.style.backgroundColor = '#8b5cf6'}
         >
           <span>🤖</span>
-          <span> Explanation</span>
+          <span> View Insights</span>
         </button>
 
         <button 
@@ -3835,7 +3835,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           onMouseOut={(e) => e.target.style.backgroundColor = '#22c55e'}
         >
           <span>⬇️</span>
-          <span>Export Prophecy</span>
+          <span>Export Data</span>
         </button>
       </div>
     </div>
@@ -3891,7 +3891,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
               gap: '6px'
             }}>
               <span style={{ color: skuColor }}>🔥</span>
-              <span>Demand for {forecast.item_name || forecast.itemname || 'Item'} - Full Range Coverage</span>
+              <span>Projected Demand: {forecast.item_name || forecast.itemname || 'Item'} - Full Range Coverage</span>
             </h4>
 
             {/* ==================== CHART AREA ==================== */}
@@ -3944,7 +3944,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   strokeWidth={1.5}
                   strokeDasharray="5 5" 
                   dot={false}
-                  name="Lower Bound (90%)"
+                  name="Expected minimum demand:"
                   isAnimationActive={false}
                 />
 
@@ -3956,7 +3956,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   strokeWidth={1.5}
                   strokeDasharray="5 5" 
                   dot={false}
-                  name="Upper Bound (90%)"
+                  name="Expected maximum demand:"
                   isAnimationActive={false}
                 />
               </LineChart>
@@ -3975,7 +3975,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
             }}>
               🔥 {(forecast.forecast || []).length} Projection points covering FULL range | 
               Total Predicted: {totalPredicted.toLocaleString()} units | 
-              Confidence: {forecastAccuracy}% | 
+               
               📅 Complete coverage {filterFromDate} to {filterToDate} | 
               🚫 No more limited Projections!
             </div>
@@ -4158,7 +4158,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           fontSize: '14px',
           margin: '4px 0 0 0'
         }}>
-          A-powered stock optimization based on uploaded file data • Date range: {filterFromDate} to {filterToDate}
+          Stock recommendations based on your uploaded sales data • Date range: {filterFromDate} to {filterToDate}
         </p>
       </div>
       
@@ -4190,9 +4190,9 @@ const metricWarning = data?.business_metrics?.metric_warning;
           <tr style={{ backgroundColor: '#f8fafc' }}>
             <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Item Name</th>
             <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>SKU</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Safety Stock</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Point</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended Stock</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Minimum Safety Stock</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Level</th>
           </tr>
         </thead>
         <tbody>
@@ -4394,7 +4394,18 @@ const metricWarning = data?.business_metrics?.metric_warning;
                                                                                     }}>
                                                                                       📊 Based on uploaded file data • Timeline: {action.timeline || '1-3 days'} • 
                                                                                       Investment: ₹{action.investmentrequired?.toLocaleString() || '0'} • 
-                                                                                      ROI: {action.expectedroi || '150'}%
+                                                                                      <div style={{
+                                                                                        fontSize: "14px",
+  marginTop: '10px',
+  padding: '10px',
+  backgroundColor: '#fef2f2',
+  borderRadius: '8px',
+  border: '1px solid #fecaca'
+}}>
+  <strong style={{ color: '#dc2626' }}>
+    📊 Estimated missed sales opportunity: ₹{action.investmentrequired?.toLocaleString() || '0'}
+  </strong>
+</div>
                                                                                     </div>
                                                                                   </div>
                                                                                   
@@ -5594,10 +5605,10 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 </div>
                 <div>
                   <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '4px' }}>
-                    Rajesh Kumar
+                    Store Owner
                   </div>
                   <div style={{ fontSize: '14px', opacity: '0.8' }}>
-                    CEO, Indian Retail Chain
+                    Local Retail Business
                   </div>
                 </div>
               </div>
@@ -5607,8 +5618,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 lineHeight: '1.5',
                 margin: '0'
               }}>
-                "Intelligent assistant helped us increase revenue by 18% in just 3 months. 
-                The ROI was immediate and the insights are invaluable for our business decisions."
+                "Within the first few weeks, we started making better stocking decisions based on clear demand insights. This helped reduce missed sales and improve overall revenue consistency—without guesswork."
               </p>
             </div>
 
@@ -5632,10 +5642,10 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 </div>
                 <div>
                   <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '4px' }}>
-                    Priya Sharma
+                    Operations Manager
                   </div>
                   <div style={{ fontSize: '14px', opacity: '0.8' }}>
-                    Operations Director, Fashion Retail
+                    Retail Store Operations
                   </div>
                 </div>
               </div>
@@ -5645,8 +5655,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 lineHeight: '1.5',
                 margin: '0'
               }}>
-                "The accuracy is incredible - 94.2% Estimate precision helped us reduce inventory costs 
-                by ₹2.4 lakhs per month while improving customer satisfaction."
+                "We gained clear visibility into what to stock and when, helping us reduce excess inventory while keeping products consistently available for customers."
               </p>
             </div>
           </div>
@@ -5666,7 +5675,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 99%
               </div>
               <div style={{ fontSize: '14px', opacity: '0.9' }}>
-                Customer Satisfaction
+                System Performance Stability
               </div>
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -5674,7 +5683,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 500+
               </div>
               <div style={{ fontSize: '14px', opacity: '0.9' }}>
-                Active Retailers
+                Product Capacity Supported
               </div>
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -5690,7 +5699,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 15%
               </div>
               <div style={{ fontSize: '14px', opacity: '0.9' }}>
-                Avg Revenue Increase
+                Efficiency Potential Range
               </div>
             </div>
           </div>
@@ -5708,10 +5717,10 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 fontWeight: '600',
                 marginBottom: '16px'
               }}>
-                Industry Certifications
+                Security & Data Protection Ready
               </h4>
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                {['ISO 27001', 'SOC 2 Type II', 'GDPR Compliant', 'PCI DSS'].map((cert, index) => (
+                {['End-to-End Encryption', 'Secure Data', 'Privacy-First Design', 'Protected Data'].map((cert, index) => (
                   <div key={index} style={{
                     backgroundColor: 'rgba(255, 255, 255, 0.1)',
                     padding: '8px 16px',
@@ -5730,10 +5739,10 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 fontWeight: '600',
                 marginBottom: '16px'
               }}>
-                Featured In
+                Featured For
               </h4>
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                {['TechCrunch', 'Forbes India', 'Economic Times', 'YourStory'].map((media, index) => (
+                {['Supermarkets', 'Stores', 'Businesses', 'Retailers'].map((media, index) => (
                   <div key={index} style={{
                     backgroundColor: 'rgba(255, 255, 255, 0.1)',
                     padding: '8px 16px',
@@ -5761,9 +5770,9 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 Contact Us
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                📞 Sales: +91-9000897418-APTSTOCK<br />
-                📧 Support: aptstock@gmail.com<br />
-                💬 Response time: &lt; 2 hours
+                📞 Sales: +91-9000897418-AptStock<br />
+                📧 Support: aptstockapp@gmail.com<br />
+                💬 Response time: &lt; 1 hours
               </div>
             </div>
             <div>
@@ -5771,7 +5780,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 Enterprise
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                📧 aptstock@gmail.com<br />
+                📧 aptstockapp@gmail.com<br />
                 📞 +91-9000897418-ENTERPRISE<br />
                 🗓️ Book demo: calendly.com/aptstock
               </div>
@@ -5781,9 +5790,9 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 Office
               </h4>
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                🏢 hyderabad, India<br />
-                🌍 Serving 500+ retailers globally<br />
-                ⏰ 24/7 powered insights
+                🏢 Hyderabad, Telangana, India<br />
+                🌍 Built with early retail partners<br />
+                ⏰ 24/7 Real-time insights available
               </div>
             </div>
           </div>
