@@ -30,18 +30,29 @@ class DatabaseService:
         """Create new user in database"""
         try:
             user_doc = {
-                "email": user_data["email"],
+                "email": user_data["email"].strip().lower(),
                 "password_hash": user_data["password_hash"],
                 "full_name": user_data["full_name"],
                 "company_name": user_data["company_name"],
-                "created_at": datetime.utcnow(),
 
-    # ✅ ADD THESE
+                # Core
+                "created_at": datetime.utcnow(),
+                "is_verified": False,
+
+                # Auth system
+                "refresh_tokens": [],
+
+                # Password reset system
+                "reset_otp": None,
+                "reset_otp_expiry": None,
+                "reset_otp_used": False,
+
+                # Trial system
                 "trial_status": "ACTIVE",
                 "trial_end_date": datetime.utcnow() + timedelta(days=14),
 
-                "is_verified": False,
-                "refresh_tokens": []
+                # ✅ ROLE SYSTEM (VERY IMPORTANT)
+                "role": "admin" if user_data["email"].strip().lower() == "your-email@gmail.com" else "user"
             }
             result = users_collection.insert_one(user_doc)
             return str(result.inserted_id)
