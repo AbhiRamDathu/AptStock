@@ -26,7 +26,7 @@ MONGODB_URI = (
     or os.getenv("MONGO_URI")
     or "mongodb://localhost:27017"
 )
-DATABASE_NAME = os.getenv("DATABASE_NAME", "apdf_io_mongo")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "aptstock_db")
 print("SMTP_EMAIL:", os.getenv("SMTP_EMAIL"))
 print("SMTP_PASSWORD:", os.getenv("SMTP_PASSWORD"))
 
