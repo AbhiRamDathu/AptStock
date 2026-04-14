@@ -1552,7 +1552,7 @@ const handleUpgradeROICalculator = (newMultiplier) => {
   };
 
   const handleContactSales = () => {
-    alert('📞 Enterprise Sales Team:\n\n🏢 Custom Excel integrations\n💰 Volume processing discounts\n🎯 Dedicated support team\n📈 Advanced prophecy models\n\n☎️ Direct: +91-9000-APTSTOCK\n📧 Enterprise: aptstock@gmail.com');
+    alert('📞 Enterprise Sales Team:\n\n🏢 Custom Excel integrations\n💰 Volume processing discounts\n🎯 Dedicated support team\n📈 Advanced prophecy models\n\n☎️ Direct: +91-9000897418-AptStock\n📧 Enterprise: aptstockapp@gmail.com');
   };
 
 // Export full historical item-level data to CSV
@@ -1620,7 +1620,7 @@ const showPaymentQr = () => {
       </p>
 
       <img
-        src="upi-qr.jpeg"
+        src="upi-qr.jpg"
         alt="Payment QR Code"
         style={{
           width: 420, height: 550, borderRadius: 12
@@ -2074,7 +2074,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           color: '#15803d',
           letterSpacing: '0.2px'
         }}>
-          Powered by real Assistant
+          Powered by AptStock Intelligence
         </span>
       </div>
 
@@ -2165,7 +2165,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           transition: 'all 0.2s ease'
         }}
       >
-        🎁 Free Trial - 14 Days
+        🎁 Free Trial - 7 Days
       </button>
 
       {/* Upgrade to Pro Button */}
@@ -2221,7 +2221,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
             letterSpacing: '0.2px'
           }}
         >
-          📞 +1-900-APTSTOCK
+          📞 +91-900-APTSTOCK
         </button>
       </div>
     </div>
@@ -2256,7 +2256,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
               margin: '0 0 20px 0',
               lineHeight: '1.1'
             }}>
-             Smart Stock Planning That Increases Revenue 
+             Plan Stock Smarter. Avoid Stockouts. Increase Profit. 
             </h2>
             
             <p style={{
@@ -2282,14 +2282,15 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 fontWeight: '600',
                 opacity: '0.9'
               }}>
-                Powered by:
+                
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-                {['Prophecy', 'Optimize', 'Demand', 'Analysis', 'Projection'].map((company, index) => (
+                {['✔ Based on your store’s real sales data', '✔ Covers next 7 & 15 days demand planning', '✔ Helps reduce stockouts and overstock'].map((company, index) => (
                   <div key={index} style={{
                     backgroundColor: 'rgba(255, 255, 255, 0.15)',
                     padding: '8px 16px',
                     borderRadius: '8px',
+                    marginLeft: '-22px',
                     fontSize: '14px',
                     fontWeight: '600',
                     border: '1px solid rgba(255, 255, 255, 0.2)'
@@ -2355,7 +2356,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
               <button
-              onClick={showROICalculator}
+              
                 style={{
                   backgroundColor: '#22c55e',
                   color: 'white',
@@ -2372,7 +2373,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   transition: 'all 0.2s ease'
                 }}
               >
-                💰 ROI Calculator
+                💰 Check Your Store Profit Impact
               </button>
 
               <button
@@ -2393,12 +2394,12 @@ const metricWarning = data?.business_metrics?.metric_warning;
                   backdropFilter: 'blur(10px)'
                 }}
               >
-                🎬 Watch 2-Min Demo
+                🎬 See How It Works (2 min)
               </button>
             </div>
           </div>
 
-          {/* Right Section - Demo Video */}
+          {/* Right Section  Demo Video */}
           <div style={{ textAlign: 'center' }}>
             <div
               style={{
@@ -2439,7 +2440,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
                 margin: '0 0 8px 0',
                 color: '#ffffff'
               }}>
-                See AptStock in Action
+                See Real Store Example
               </h3>
               
               <p style={{
@@ -2466,20 +2467,21 @@ const metricWarning = data?.business_metrics?.metric_warning;
           margin: '48px auto 0'
         }}>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>15%</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Efficiency Potential Range</div>
+            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}></div>
+            <div style={{ fontSize: '16px', fontWeight: '600', opacity: '0.9' }}><span style={{color: '#22c55e'}}>✔</span> Works with your real sales data</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>500+</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Product Capacity Supported</div>
+            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}></div>
+            <div style={{ fontSize: '16px', fontWeight: '600', opacity: '0.9' }}><span style={{color: '#22c55e'}}>✔</span> Supports 1000+ products per store</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>99.2%</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>System Stability Indicator</div>
+            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}></div>
+            <div style={{ fontSize: '16px', fontWeight: '600', opacity: '0.9' }}><span style={{color: '#22c55e'}}>✔</span>
+               Generates daily demand Insights</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}>₹2M+</div>
-            <div style={{ fontSize: '14px', fontWeight: '600', opacity: '0.9' }}>Inventory Value Capacity</div>
+            <div style={{ fontSize: '32px', fontWeight: '900', marginBottom: '4px', color: '#22c55e' }}></div>
+            <div style={{ fontSize: '16px', fontWeight: '600', opacity: '0.9' }}><span style={{color: '#22c55e'}}>✔</span> Helps improve purchase decisions</div>
           </div>
         </div>
       </div>
@@ -4298,7 +4300,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                 margin: '0',
                                                                                 color: '#1f2937'
                                                                               }}>
-                                                                                🚨 Priority Action Recommendations
+                                                                                📈 Top Revenue Growth Recommendations
                                                                               </h3>
                                                                               <p style={{
                                                                                 color: '#6b7280',
@@ -4328,7 +4330,13 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                           
                                                                           {/* ✅ FIXED: Simple list layout showing REAL item names */}
                                                                           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                                                            {data.priorityActions.map((action, index) => (
+                                                                            {data.priorityActions.map((action, index) => {
+                                                                              const hasCurrentStock =
+                                                                                action.has_current_stock === true &&
+                                                                                action.current_stock !== null &&
+                                                                                action.current_stock !== undefined;
+
+                                                                              return (
                                                                               <div key={index} style={{
                                                                                 padding: '20px',
                                                                                 border: action.priority === 'HIGH' ? '2px solid #fecaca' : '2px solid #fed7aa',
@@ -4347,7 +4355,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                       color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
                                                                                       marginBottom: '8px'
                                                                                     }}>
-                                                                                      {action.priority} PRIORITY: {action.action}
+                                                                                       {action.action}
                                                                                     </div>
                                                                                     <div style={{
                                                                                       fontSize: '14px',
@@ -4364,9 +4372,9 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                     <div style={{
                                                                                       fontSize: '14px',
                                                                                       color: '#374151',
-                                                                                      marginBottom: '12px'
+                                                                                      marginBottom: '12px',
                                                                                     }}>
-                                                                                      {action.recommendedaction || action.description}
+                                                                                      
                                                                                     </div>
                                                                                     <div style={{
                                                                                       fontSize: '14px',
@@ -4376,7 +4384,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                       fontWeight: '500'
                                                                                     }}>
                                                                                       <div>
-  📦 Next 7 days stock recommendation: <strong>{
+  📦 Recommended Stock for next 7 days: <strong>{
     action.recommended_stock_7_days != null
       ? Number(action.recommended_stock_7_days).toLocaleString()
       : (
@@ -4386,26 +4394,36 @@ It enables smarter, data-driven inventory decisions from day one."
         )
   }</strong> units
 </div>
-                                                                                      🚨 URGENT: Recommended demand for next 15 days: {action.recommended_stock?.toLocaleString() || 'N/A'} units, Because of Daily Demand: {action.daily_sales?.toFixed(1) || 'N/A'} units/day
+                                                                                      🚨 Expected demand for next 15 days: <strong>{action.recommended_stock?.toLocaleString() || 'N/A'}</strong> units, <div
+                                                                                      style={{
+                                                                                        marginTop: '2px',
+                                                                                        fontWeight: '',
+                                                                                      }}
+                                                                                      > </div>
                                                                                     </div>
+                                                                                    {hasCurrentStock && (
+  <div>
+    📦 Current stock available: <strong>{Number(action.current_stock).toLocaleString()}</strong> units
+  </div>
+)}
                                                                                     <div style={{
                                                                                       fontSize: '12px',
                                                                                       color: '#6b7280'
                                                                                     }}>
-                                                                                      📊 Based on uploaded file data • Timeline: {action.timeline || '1-3 days'} • 
-                                                                                      Investment: ₹{action.investmentrequired?.toLocaleString() || '0'} • 
+                                                                                        
                                                                                       <div style={{
                                                                                         fontSize: "14px",
   marginTop: '10px',
-  padding: '10px',
-  backgroundColor: '#fef2f2',
+  padding: '10px 14px',
+  backgroundColor: '#ECFDF5',
   borderRadius: '8px',
-  border: '1px solid #fecaca'
+  border: '1px solid #10B981'
 }}>
-  <strong style={{ color: '#dc2626' }}>
-    📊 Estimated missed sales opportunity: ₹{action.investmentrequired?.toLocaleString() || '0'}
+  <strong style={{ color: '#065F46', fontWeight:'600', fontSize: '15px' }}>
+    💰 Expected Sales Value (Next 15 Days): ₹{action.investmentrequired?.toLocaleString() || '0'}
   </strong>
 </div>
+<div style={{marginTop: '3px', fontSize: '13px'}}>📊 Based on your store’s average sales (<strong>{action.daily_sales?.toFixed(1) || 'N/A'}</strong> units/day)</div>
                                                                                     </div>
                                                                                   </div>
                                                                                   
@@ -4415,16 +4433,7 @@ It enables smarter, data-driven inventory decisions from day one."
   
 
   {/* Revenue Risk Calculation */}
-  <div style={{ 
-    backgroundColor: '#22c55e', 
-    padding: '9px 16px',
-    marginLeft: '300px',
-    marginBottom: '-10px', 
-    borderRadius: '10px'
-  }}>
-    <strong style={{ color: '#ffffffff', fontSize: '14px', margin: '-5px 2px -7px -5px' }}> Revenue Risk: ₹{Math.max(0, action.expected_revenue - action.expected_profit)?.toLocaleString() || '0'}</strong>
-    
-  </div>
+ 
 
                                                                                 </div>
                                                                                 
@@ -4573,7 +4582,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                        setModalOpen(true);
                                      }}
                                      style={{
-                                       backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                       backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#F97316',
                                        color: 'white',
                                        padding: '8px 16px',
                                        border: 'none',
@@ -4583,7 +4592,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                        fontSize: '12px'
                                      }}
                                    >
-                                     View Implementation Plan
+                                     🛒 View Restock Plan
                                    </button>
                                    
                                                                                   
@@ -4710,12 +4719,12 @@ It enables smarter, data-driven inventory decisions from day one."
                                        fontSize: '12px'
                                      }}
                                    >
-                                     View Details
+                                     📊 See Details
                                    </button>
                                    
                                                                                 </div>
                                                                               </div>
-                                                                            ))}
+                                                                            )})}
                                                                           </div>
                                                                           
                                                                           <div style={{
@@ -6135,13 +6144,13 @@ It enables smarter, data-driven inventory decisions from day one."
               <span style={{ fontSize: '20px' }}>📧</span>
               <div>
                 <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Email</div>
-                <a href="mailto:aptstock@gmail.com" style={{
+                <a href="mailto:aptstockapp@gmail.com" style={{
                   fontSize: '16px',
                   fontWeight: '600',
                   color: '#2563eb',
                   textDecoration: 'none'
                 }}>
-                  aptstock@gmail.com
+                  aptstockapp@gmail.com
                 </a>
               </div>
             </div>
@@ -6156,7 +6165,7 @@ It enables smarter, data-driven inventory decisions from day one."
                   color: '#2563eb',
                   textDecoration: 'none'
                 }}>
-                  +91-9000897418-APTSTOCK
+                  +91-9000897418-AptStock
                 </a>
               </div>
             </div>
@@ -6215,7 +6224,7 @@ It enables smarter, data-driven inventory decisions from day one."
 
           <button
             onClick={() => {
-              window.location.href = 'mailto:aptstock@gmail.com?subject=Upgrade to Pro Request';
+              window.location.href = 'mailto:aptstockapp@gmail.com?subject=Upgrade to Pro Request';
             }}
             style={{
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -6464,7 +6473,7 @@ It enables smarter, data-driven inventory decisions from day one."
                 textDecoration: 'none',
                 display: 'block'
               }}>
-                📞 +91-9000897418-APTSTOCK
+                📞 +91-9000897418-AptStock
               </a>
             </div>
           </div>
@@ -6498,14 +6507,14 @@ It enables smarter, data-driven inventory decisions from day one."
               <div style={{ fontSize: '14px', color: '#64748b', fontWeight: '600', marginBottom: '4px' }}>
                 Enterprise Email
               </div>
-              <a href="mailto:aptstock@gmail.com?subject=Enterprise Inquiry" style={{
+              <a href="mailto:aptstockapp@gmail.com?subject=Enterprise Inquiry" style={{
                 fontSize: '18px',
                 fontWeight: '700',
                 color: '#3b82f6',
                 textDecoration: 'none',
                 display: 'block'
               }}>
-                aptstock@gmail.com
+                aptstockapp@gmail.com
               </a>
             </div>
           </div>
@@ -6584,7 +6593,7 @@ It enables smarter, data-driven inventory decisions from day one."
 
           <button
             onClick={() => {
-              window.location.href = 'mailto:aptstock@gmail.com?subject=Enterprise Sales Inquiry&body=Hi, I would like to discuss enterprise solutions.';
+              window.location.href = 'mailto:aptstockapp@gmail.com?subject=Enterprise Sales Inquiry&body=Hi, I would like to discuss enterprise solutions.';
             }}
             style={{
               background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
@@ -6617,10 +6626,10 @@ It enables smarter, data-driven inventory decisions from day one."
           border: '2px solid #bbf7d0'
         }}>
           <div style={{ fontSize: '15px', fontWeight: '700', color: '#166534', marginBottom: '6px' }}>
-            🏆 Trusted by Fortune 500 Retailers
+            🏆 Powered by Fortune Assistance
           </div>
           <div style={{ fontSize: '13px', color: '#15803d', fontWeight: '600' }}>
-            Walmart • Target • Costco • Best Buy • Home Depot
+            Prophecy • Optimise • Demand • Analysis • Projection
           </div>
         </div>
       </div>
@@ -6664,7 +6673,7 @@ const TrialPaywallModal = () => {
       annualPrice: '₹30,000',
       savingsPercent: '17%',
       features: [
-        '✅ Up to 10 products',
+        '✅ Up to 500 products',
         '✅ Basic projection',
         '✅ Email support',
         '✅ 30-day data retention',
@@ -6680,7 +6689,7 @@ const TrialPaywallModal = () => {
       annualPrice: '₹75,000',
       savingsPercent: '17%',
       features: [
-        '✅ Unlimited products',
+        '✅ Up to 2000 products',
         '✅ Advanced projections',
         '✅ Priority email support',
         '✅ 1-year data retention',
@@ -6724,7 +6733,7 @@ const TrialPaywallModal = () => {
 
   const handleContactSales = () => {
     console.log('Opening contact sales form');
-    alert('📞 Enterprise Sales Team will contact you within 2 hours.\n\n☎️ Direct: +91-9000-APTSTOCK\n📧 Email: aptstock@gmail.com');
+    alert('📞 Enterprise Sales Team will contact you within 2 hours.\n\n☎️ Direct: +91-9000-AptStock\n📧 Email: aptstockapp@gmail.com');
   };
 
   return (
@@ -7011,7 +7020,7 @@ const TrialPaywallModal = () => {
             </h3>
 
             <img
-              src="upi-qr.jpeg"
+              src="upi-qr.jpg"
               alt="UPI payment QR"
               style={{ width: 420, height: 550, borderRadius: 12 }}
             />
