@@ -4,11 +4,16 @@ from bson.objectid import ObjectId
 from datetime import datetime, timedelta
 from typing import Optional
 import os
+import certifi
 
 from app.config import MONGODB_URI, DATABASE_NAME
 
 # MongoDB Connection
-client = MongoClient(MONGODB_URI)
+
+client = MongoClient(
+    MONGODB_URI,
+    tlsCAFile=certifi.where()
+)
 db = client[DATABASE_NAME]
 
 # Collections
