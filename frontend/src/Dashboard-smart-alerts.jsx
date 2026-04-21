@@ -117,6 +117,19 @@ const [modalContent, setModalContent] = useState(null);
   const [fileAvailableDates, setFileAvailableDates] = useState({ min: '', max: '' });
   const [excelItemNames, setExcelItemNames] = useState([]);
 
+  const [loadingStage, setLoadingStage] = useState('idle');
+
+const loadingStages = [
+  { key: 'uploading', label: 'Uploading file...', progress: 10 },
+  { key: 'parsing', label: 'Reading data...', progress: 25 },
+  { key: 'forecasting', label: 'Analyzing your sales patterns...', progress: 55 },
+  { key: 'inventory', label: 'Optimizing inventory...', progress: 75 },
+  { key: 'insights', label: 'Preparing insights...', progress: 90 },
+  { key: 'complete', label: 'Finalizing...', progress: 100 }
+];
+
+const currentStage = loadingStages.find(s => s.key === loadingStage);
+
   // Progress indicator state
   const [steps, setSteps] = useState([
     { id: 1, title: 'Upload Data', status: 'pending', icon: '📁' },
@@ -135,6 +148,29 @@ const [modalContent, setModalContent] = useState(null);
     }
     return () => clearInterval(interval);
   }, [loading, uploadStartTime]);
+
+  useEffect(() => {
+  if (!loading) return;
+
+  const stageFlow = [
+    { stage: 'uploading', delay: 500 },
+    { stage: 'parsing', delay: 2000 },
+    { stage: 'forecasting', delay: 5000 },
+    { stage: 'inventory', delay: 9000 },
+    { stage: 'insights', delay: 13000 }
+  ];
+
+  let timers = [];
+
+  stageFlow.forEach(({ stage, delay }) => {
+    const t = setTimeout(() => {
+      setLoadingStage(stage);
+    }, delay);
+    timers.push(t);
+  });
+
+  return () => timers.forEach(clearTimeout);
+}, [loading]);
 
  
   // ✅ NEW: Listen for trial_expired events from API
@@ -420,6 +456,7 @@ const handleApplyDateFilters = async () => {
     });
     setLoading(true);
     setUploadStartTime(Date.now());
+    setLoadingStage('parsing');
     setProcessingStage('filtering');
 
     // Small delay for UI update
@@ -545,6 +582,7 @@ const handleApplyDateFilters = async () => {
       message: `✅ Complete! Forecasts: ${mappedData.forecasts.length} | Inventory: ${mappedData.inventory.length} | Actions: ${mappedData.priorityActions.length} | Time: ${finalTime}s | ${filterContext.filter_message}`
     });
 
+    setLoadingStage('complete');
     setProcessingStage('complete');
     setActiveView('forecast');
 
@@ -602,8 +640,8 @@ const handleFileUpload = async (event) => {
   }
 
   setUploadStatus({ type: 'uploading', message: '📤 Uploading file...' });
-  setProcessingStage('uploading');
   setLoading(true);
+  setLoadingStage('uploading');
   setUploadStartTime(Date.now());
 
   try {
@@ -806,7 +844,7 @@ console.log('✅ Mapped Data Result:', {
         message: `✅ Your insights are ready — start optimizing your stock decisions!`
       });
 
-      setProcessingStage('complete');
+      setLoadingStage('complete');
       setActiveView('forecast');
 
       // Force chart refresh
@@ -817,6 +855,10 @@ console.log('✅ Mapped Data Result:', {
       // ✅ FIXED: Update all steps progressively
       updateStepStatus(1, 'completed');
       updateStepStatus(2, 'completed');
+
+      setTimeout(() => {
+        setLoadingStage('idle');
+                }, 1000);
 
         // Wait a bit, then mark insights as viewed
       setTimeout(() => {
@@ -2486,6 +2528,75 @@ const metricWarning = data?.business_metrics?.metric_warning;
         </div>
       </div>
 
+      {loading && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+
+    // ❌ REMOVE gradient
+    // background: 'linear-gradient(...)',
+
+    // ✅ Make it transparent
+    background: 'rgba(0,0,0,0.0)',
+
+    // Optional subtle blur (VERY NICE UX)
+    backdropFilter: 'blur(4px)',
+
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    pointerEvents: 'none' // 👈 IMPORTANT (lets UI stay visible)
+  }}>
+
+    {/* Actual Loader Card */}
+    <div style={{
+      pointerEvents: 'auto', // allow interaction if needed
+      background: 'white',
+      padding: '24px 32px',
+      borderRadius: '12px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
+    }}>
+
+      {/* Spinner */}
+      <div style={{
+        width: '40px',
+        height: '40px',
+        border: '4px solid #e5e7eb',
+        borderTop: '4px solid #3b82f6',
+        borderRadius: '50%',
+        animation: 'spin 1s linear infinite'
+      }} />
+
+      {/* Text */}
+      <p style={{
+        marginTop: '12px',
+        fontSize: '14px',
+        color: '#374151',
+        fontWeight: '600',
+        textAlign: 'center',
+        transition: 'all 0.3s ease'
+      }}>
+        {currentStage?.label || 'Starting...'}
+      </p>
+
+    </div>
+
+    <style>{`
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `}</style>
+  </div>
+)}
+
       {/* Main Content */}
       <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
         {/* Progress Indicator */}
@@ -3616,29 +3727,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                                                            📥 Export Data
                                                                                                                          </button>
                                                                                                                          <button 
-                                     onClick={() => {
-                                       setModalTitle("📊 Historical Analysis Explanation");
-                                       setModalContent(
-                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
-                                           <p style={{marginBottom: "12px"}}>
-                                             <strong style={{color: "#3b82f6"}}>✅ Data Source:</strong> Your uploaded Excel file
-                                           </p>
-                                           <p style={{marginBottom: "12px"}}>
-                                             <strong style={{color: "#3b82f6"}}>📅 Date Range:</strong> {data.roiData?.dateRange}
-                                           </p>
-                                           <p style={{marginBottom: "12px"}}>
-                                             <strong style={{color: "#3b82f6"}}>📈 Analysis:</strong> Shows actual sales patterns from {data.historical?.length || 0} records
-                                           </p>
-                                           <p style={{marginBottom: "12px"}}>
-                                             <strong style={{color: "#22c55e"}}>🎯 Confidence:</strong> 94.2% based on An analysis
-                                           </p>
-                                           <p style={{marginBottom: "0", fontSize: "13px", color: "#64748b"}}>
-                                             💡 Hover over chart points to see detailed item information
-                                           </p>
-                                         </div>
-                                       );
-                                       setModalOpen(true);
-                                     }}
+                                     
                                      style={{
                                        backgroundColor: '#8b5cf6',
                                        color: 'white',
@@ -4024,84 +4113,6 @@ It enables smarter, data-driven inventory decisions from day one."
               </button>
 
               <button
-                onClick={() => {
-                  setModalTitle(`📊 Projection Details: ${forecast.item_name || 'Item'}`);
-                  setModalContent(
-                    <div style={{ textAlign: 'left', lineHeight: '1.8', fontSize: '13px' }}>
-                      <div style={{
-                        backgroundColor: '#f0fdf4',
-                        border: '1px solid #86efac',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        marginBottom: '16px'
-                      }}>
-                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#166534', marginBottom: '8px' }}>
-                          📦 Item Information
-                        </div>
-                        <div style={{ color: '#166534' }}>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>Name:</strong> {forecast.item_name || forecast.itemname || 'N/A'}
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>SKU:</strong> {forecast.sku || 'N/A'}
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>Training Days:</strong> {forecast.training_days || 'N/A'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{
-                        backgroundColor: '#eff6ff',
-                        border: '1px solid #bfdbfe',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        marginBottom: '16px'
-                      }}>
-                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#1e40af', marginBottom: '8px' }}>
-                          📊 Model Performance
-                        </div>
-                        <div style={{ color: '#1e40af' }}>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>MAPE (Accuracy):</strong> {forecastMape}%
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>Confidence Level:</strong> {forecastAccuracy}%
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>Total Estimate Points:</strong> {(forecast.forecast || []).length}
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            <strong>Total Predicted Units:</strong> {totalPredicted.toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{
-                        backgroundColor: '#fef3c7',
-                        border: '1px solid #fcd34d',
-                        padding: '12px',
-                        borderRadius: '8px'
-                      }}>
-                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#92400e', marginBottom: '8px' }}>
-                          📅 Date Range Coverage
-                        </div>
-                        <div style={{ color: '#92400e' }}>
-                          <div style={{ margin: '4px 0' }}>
-                            From: {filterFromDate}
-                          </div>
-                          <div style={{ margin: '4px 0' }}>
-                            To: {filterToDate}
-                          </div>
-                          <div style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#b45309' }}>
-                            ✓ Estimate spans complete date range with no gaps
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                  setModalOpen(true);
-                }}
                 style={{
                   backgroundColor: 'transparent',
                   color: '#3b82f6',
@@ -4439,148 +4450,6 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                 
                                                                                 <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
                                                                                   <button 
-                                     onClick={() => {
-                                       setModalTitle(`🚀 Implementation Plan: ${action.itemname}`);
-                                       setModalContent(
-                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
-                                           {/* Header with Priority */}
-                                           <div style={{
-                                             backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
-                                             border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
-                                             padding: "16px",
-                                             borderRadius: "12px",
-                                             marginBottom: "20px"
-                                           }}>
-                                             <div style={{fontSize: "18px", fontWeight: "700", marginBottom: "8px"}}>
-                                               {action.action}
-                                             </div>
-                                             <div style={{
-                                               display: "flex",
-                                               gap: "12px",
-                                               alignItems: "center",
-                                               fontSize: "13px"
-                                             }}>
-                                               <span style={{
-                                                 backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-                                                 color: 'white',
-                                                 padding: "4px 12px",
-                                                 borderRadius: "6px",
-                                                 fontWeight: "700"
-                                               }}>
-                                                 {action.priority} PRIORITY
-                                               </span>
-                                               <span style={{fontWeight: "600", color: "#64748b"}}>
-                                                 SKU: {action.sku}
-                                               </span>
-                                             </div>
-                                           </div>
-                                   
-                                           {/* Timeline */}
-                                           <div style={{marginBottom: "20px"}}>
-                                             <strong style={{color: "#3b82f6", fontSize: "15px"}}>⏱️ Timeline:</strong>
-                                             <div style={{
-                                               marginTop: "8px",
-                                               padding: "12px",
-                                               backgroundColor: "#eff6ff",
-                                               borderRadius: "8px",
-                                               fontSize: "16px",
-                                               fontWeight: "600",
-                                               color: "#1e40af"
-                                             }}>
-                                               {action.timeline || '1-3 days'}
-                                             </div>
-                                           </div>
-                                   
-                                           {/* Financial Breakdown */}
-                                           <div style={{
-                                             backgroundColor: "#f8fafc",
-                                             border: "2px solid #e2e8f0",
-                                             borderRadius: "12px",
-                                             padding: "16px",
-                                             marginBottom: "20px"
-                                           }}>
-                                             <div style={{fontSize: "15px", fontWeight: "700", marginBottom: "12px", color: "#1f2937"}}>
-                                               💰 Financial Impact:
-                                             </div>
-                                   
-                                             {/* Revenue at Risk */}
-                                             <div style={{
-                                               display: "flex",
-                                               justifyContent: "space-between",
-                                               marginBottom: "12px",
-                                               padding: "10px",
-                                               backgroundColor: "#fef2f2",
-                                               borderRadius: "6px"
-                                             }}>
-                                               <span style={{fontWeight: "600", color: "#991b1b"}}>Revenue at Risk:</span>
-                                               <span style={{fontSize: "18px", fontWeight: "700", color: "#dc2626"}}>
-                                                 ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
-                                               </span>
-                                             </div>
-                                   
-                                             {/* Investment Required */}
-                                             <div style={{
-                                               display: "flex",
-                                               justifyContent: "space-between",
-                                               marginBottom: "12px",
-                                               padding: "10px",
-                                               backgroundColor: "#fff7ed",
-                                               borderRadius: "6px"
-                                             }}>
-                                               <span style={{fontWeight: "600", color: "#9a3412"}}>Investment Required:</span>
-                                               <span style={{fontSize: "18px", fontWeight: "700", color: "#ea580c"}}>
-                                                 ₹{action.investmentrequired?.toLocaleString() || 0}
-                                               </span>
-                                             </div>
-                                   
-                                             {/* Expected ROI */}
-                                             <div style={{
-                                               display: "flex",
-                                               justifyContent: "space-between",
-                                               padding: "10px",
-                                               backgroundColor: "#f0fdf4",
-                                               borderRadius: "6px"
-                                             }}>
-                                               <span style={{fontWeight: "600", color: "#166534"}}>Expected ROI:</span>
-                                               <span style={{fontSize: "20px", fontWeight: "800", color: "#22c55e"}}>
-                                                 {action.expectedroi || 150}%
-                                               </span>
-                                             </div>
-                                           </div>
-                                   
-                                           {/* Action Steps */}
-                                           <div style={{marginBottom: "20px"}}>
-                                             <strong style={{color: "#8b5cf6", fontSize: "15px"}}>📋 Implementation Steps:</strong>
-                                             <ol style={{marginLeft: "20px", marginTop: "10px", color: "#475569", lineHeight: "1.8"}}>
-                                               <li><strong>Review Prophecy:</strong> Analyze {action.forecasteddemand?.toLocaleString() || 'predicted'} units demand</li>
-                                               <li><strong>Order Stock:</strong> Place order for {action.shortage?.toLocaleString() || 'required'} units</li>
-                                               <li><strong>Monitor Progress:</strong> Track delivery and stock levels</li>
-                                               <li><strong>Verify Results:</strong> Confirm ROI after {action.timeline || '1-3 days'}</li>
-                                             </ol>
-                                           </div>
-                                   
-                                           {/* Data Source Footer */}
-                                           <div style={{
-                                             marginTop: "20px",
-                                             paddingTop: "16px",
-                                             borderTop: "2px solid #e2e8f0",
-                                             fontSize: "13px",
-                                             color: "#64748b"
-                                           }}>
-                                             <div style={{marginBottom: "6px"}}>
-                                               📂 <strong>Data Source:</strong> {action.datasource || 'Real Excel File'}
-                                             </div>
-                                             <div style={{marginBottom: "6px"}}>
-                                               📅 <strong>Analysis Period:</strong> {filterFromDate} to {filterToDate}
-                                             </div>
-                                             <div>
-                                               🎯 <strong>Confidence Level:</strong> {action.confidence || 88}%
-                                             </div>
-                                           </div>
-                                         </div>
-                                       );
-                                       setModalOpen(true);
-                                     }}
                                      style={{
                                        backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#F97316',
                                        color: 'white',
@@ -4597,117 +4466,6 @@ It enables smarter, data-driven inventory decisions from day one."
                                    
                                                                                   
                                                                                   <button 
-                                     onClick={() => {
-                                       setModalTitle(`📋 Action Details for ${action.itemname}`);
-                                       setModalContent(
-                                         <div style={{textAlign: "left", lineHeight: "1.8"}}>
-                                           {/* SKU Badge */}
-                                           <div style={{
-                                             display: "inline-block",
-                                             backgroundColor: "#f1f5f9",
-                                             padding: "6px 12px",
-                                             borderRadius: "6px",
-                                             marginBottom: "16px",
-                                             fontSize: "13px",
-                                             fontWeight: "600",
-                                             color: "#64748b"
-                                           }}>
-                                             SKU: {action.sku}
-                                           </div>
-                                   
-                                           {/* Priority Badge */}
-                                           <div style={{
-                                             display: "inline-block",
-                                             backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed',
-                                             color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-                                             padding: "8px 16px",
-                                             borderRadius: "8px",
-                                             marginBottom: "20px",
-                                             marginLeft: "12px",
-                                             fontSize: "14px",
-                                             fontWeight: "700"
-                                           }}>
-                                             {action.priority} PRIORITY
-                                           </div>
-                                   
-                                           {/* Recommended Action */}
-                                           <div style={{
-                                             backgroundColor: "#f0fdf4",
-                                             border: "2px solid #22c55e",
-                                             padding: "16px",
-                                             borderRadius: "10px",
-                                             marginBottom: "20px"
-                                           }}>
-                                             <strong style={{color: "#166534", fontSize: "15px"}}>✅ Recommended Action:</strong>
-                                             <p style={{margin: "8px 0 0 0", color: "#166534", fontSize: "14px"}}>
-                                               {action.recommendedaction || 'Optimize stock levels based on A prophecy'}
-                                             </p>
-                                           </div>
-                                   
-                                           {/* Analysis Details */}
-                                           <div style={{marginBottom: "16px"}}>
-                                             <strong style={{color: "#3b82f6"}}>📊 Analysis Based On:</strong>
-                                             <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569"}}>
-                                               <li>Historical sales patterns from uploaded file</li>
-                                               <li>Professional IN demand analysis</li>
-                                               <li>Revenue risk assessment</li>
-                                               <li>Date range: {filterFromDate} to {filterToDate}</li>
-                                             </ul>
-                                           </div>
-                                   
-                                           {/* Revenue Risk */}
-                                           <div style={{
-                                             backgroundColor: "#fef2f2",
-                                             border: "1px solid #fecaca",
-                                             padding: "12px",
-                                             borderRadius: "8px",
-                                             marginBottom: "16px"
-                                           }}>
-                                             <strong style={{color: "#dc2626"}}>💰 Revenue Risk:</strong>
-                                             <span style={{
-                                               marginLeft: "8px",
-                                               fontSize: "18px",
-                                               fontWeight: "700",
-                                               color: "#dc2626"
-                                             }}>
-                                               ₹{action.estimatedrevenueloss?.toLocaleString() || 0}
-                                             </span>
-                                           </div>
-                                   
-                                           {/* Investment Required */}
-                                           {action.investmentrequired && (
-                                             <div style={{marginBottom: "12px"}}>
-                                               <strong style={{color: "#f59e0b"}}>💵 Investment Required:</strong>
-                                               <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "600"}}>
-                                                 ₹{action.investmentrequired?.toLocaleString()}
-                                               </span>
-                                             </div>
-                                           )}
-                                   
-                                           {/* Expected ROI */}
-                                           {action.expectedroi && (
-                                             <div style={{marginBottom: "12px"}}>
-                                               <strong style={{color: "#22c55e"}}>📈 Expected ROI:</strong>
-                                               <span style={{marginLeft: "8px", fontSize: "16px", fontWeight: "700", color: "#22c55e"}}>
-                                                 {action.expectedroi}%
-                                               </span>
-                                             </div>
-                                           )}
-                                   
-                                           {/* Data Source */}
-                                           <div style={{
-                                             marginTop: "20px",
-                                             paddingTop: "16px",
-                                             borderTop: "1px solid #e2e8f0",
-                                             fontSize: "12px",
-                                             color: "#94a3b8"
-                                           }}>
-                                             📂 Data Source: {action.datasource || 'Real Excel File'} | Confidence: {action.confidence || 88}%
-                                           </div>
-                                         </div>
-                                       );
-                                       setModalOpen(true);
-                                     }}
                                      style={{
                                        backgroundColor: 'transparent',
                                        color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
@@ -4822,162 +4580,6 @@ It enables smarter, data-driven inventory decisions from day one."
                     Board-ready presentation with key insights and ROI metrics
                   </p>
                   <button 
-  onClick={() => {
-    if (!data.roiData || !data.priorityActions || data.priorityActions.length === 0) {
-      setModalTitle("❌ No Data Available");
-      setModalContent(
-        <div style={{textAlign: "center", lineHeight: "1.8"}}>
-          <p style={{fontSize: "16px", color: "#dc2626", marginBottom: "12px"}}>
-            Please upload your Excel file first to generate reports.
-          </p>
-          <p style={{fontSize: "14px", color: "#64748b"}}>
-            Upload your sales data to see:
-          </p>
-          <ul style={{textAlign: "left", marginTop: "12px", color: "#475569"}}>
-            <li>Revenue projections</li>
-            <li>ROI metrics</li>
-            <li>Action plans</li>
-            <li>Executive insights</li>
-          </ul>
-        </div>
-      );
-      setModalOpen(true);
-      return;
-    }
-
-    setModalTitle("📊 Executive Summary Report");
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        {/* Header */}
-        <div style={{
-          backgroundColor: "#f0fdf4",
-          border: "2px solid #22c55e",
-          padding: "16px",
-          borderRadius: "12px",
-          marginBottom: "20px",
-          textAlign: "center"
-        }}>
-          <h3 style={{margin: "0 0 8px 0", color: "#166534", fontSize: "20px"}}>
-            Board-Ready Presentation
-          </h3>
-          <p style={{margin: 0, fontSize: "14px", color: "#166534"}}>
-            Analysis Period: {data.roiData.dateRange}
-          </p>
-        </div>
-
-        {/* Key Metrics Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "12px",
-          marginBottom: "20px"
-        }}>
-          <div style={{
-            backgroundColor: "#f0fdf4",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid #bbf7d0"
-          }}>
-            <div style={{fontSize: "12px", color: "#166534", fontWeight: "600"}}>
-              Revenue Increase
-            </div>
-            <div style={{fontSize: "20px", fontWeight: "700", color: "#22c55e"}}>
-              ₹{data.roiData.projectedIncrease?.toLocaleString()}
-            </div>
-          </div>
-
-          <div style={{
-            backgroundColor: "#eff6ff",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid #bfdbfe"
-          }}>
-            <div style={{fontSize: "12px", color: "#1e40af", fontWeight: "600"}}>
-              Cost Savings
-            </div>
-            <div style={{fontSize: "20px", fontWeight: "700", color: "#3b82f6"}}>
-              ₹{data.roiData.inventoryCostSavings?.toLocaleString()}
-            </div>
-          </div>
-
-          <div style={{
-            backgroundColor: "#fef3c7",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid #fde68a"
-          }}>
-            <div style={{fontSize: "12px", color: "#92400e", fontWeight: "600"}}>
-              Net ROI
-            </div>
-            <div style={{fontSize: "20px", fontWeight: "700", color: "#f59e0b"}}>
-              {data.roiData.netROI}%
-            </div>
-          </div>
-
-          <div style={{
-            backgroundColor: "#f3f4f6",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid #d1d5db"
-          }}>
-            <div style={{fontSize: "12px", color: "#374151", fontWeight: "600"}}>
-              Stockout Reduction
-            </div>
-            <div style={{fontSize: "20px", fontWeight: "700", color: "#6b7280"}}>
-              {data.roiData.stockoutReduction}%
-            </div>
-          </div>
-        </div>
-
-        {/* Priority Actions Summary */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#dc2626", fontSize: "15px"}}>
-            🚨 Priority Actions Required:
-          </strong>
-          <div style={{
-            marginTop: "8px",
-            padding: "12px",
-            backgroundColor: "#fef2f2",
-            borderRadius: "8px",
-            border: "1px solid #fecaca"
-          }}>
-            <div style={{fontSize: "14px", color: "#991b1b"}}>
-              <strong>{data.priorityActions.filter(a => a.priority === 'HIGH').length}</strong> High Priority Items
-            </div>
-            <div style={{fontSize: "14px", color: "#9a3412", marginTop: "4px"}}>
-              <strong>{data.priorityActions.filter(a => a.priority === 'MEDIUM').length}</strong> Medium Priority Items
-            </div>
-          </div>
-        </div>
-
-        {/* Data Source */}
-        <div style={{
-          marginTop: "20px",
-          paddingTop: "16px",
-          borderTop: "1px solid #e2e8f0",
-          fontSize: "13px",
-          color: "#64748b"
-        }}>
-          <div>📂 Data: {data.roiData.dataPoints} records analyzed</div>
-          <div>🎯 Confidence: 94.2%</div>
-          <div>⏱️ Processing: {processingTime}s</div>
-        </div>
-
-        {/* Download CTA */}
-        <div style={{
-          marginTop: "20px",
-          padding: "16px",
-          backgroundColor: "#fef3c7",
-          borderRadius: "8px",
-          textAlign: "center",
-          border: "2px solid #f59e0b"
-        }}>
-          <strong style={{color: "#92400e"}}>Upgrade to Pro</strong> to download full PDF report with watermark removal
-        </div>
-      </div>
-    );
-    setModalOpen(true);
-  }}
   style={{
     backgroundColor: '#667eea',
     color: 'white',
@@ -5039,122 +4641,6 @@ It enables smarter, data-driven inventory decisions from day one."
                     Full data scientist report with technical analysis
                   </p>
                   <button 
-  onClick={() => {
-    if (!data.forecasts || data.forecasts.length === 0) {
-      setModalTitle("❌ No Forecast Data");
-      setModalContent(
-        <div style={{textAlign: "center", padding: "20px"}}>
-          <p style={{color: "#dc2626", fontSize: "16px"}}>
-            No Projection data available. Please upload your Excel file first.
-          </p>
-        </div>
-      );
-      setModalOpen(true);
-      return;
-    }
-
-    setModalTitle("📈 Detailed Analytics Report");
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        {/* Header */}
-        <div style={{
-          backgroundColor: "#eff6ff",
-          padding: "16px",
-          borderRadius: "12px",
-          marginBottom: "20px",
-          border: "2px solid #3b82f6"
-        }}>
-          <h3 style={{margin: "0 0 8px 0", color: "#1e40af", fontSize: "18px"}}>
-            Full Data Scientist Report
-          </h3>
-          <p style={{margin: 0, fontSize: "13px", color: "#1e40af"}}>
-            Technical analysis with statistical insights
-          </p>
-        </div>
-
-        {/* Forecast Summary */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#3b82f6", fontSize: "15px"}}>
-            🤖 A Model Performance:
-          </strong>
-          <div style={{
-            marginTop: "8px",
-            padding: "12px",
-            backgroundColor: "#f8fafc",
-            borderRadius: "8px",
-            border: "1px solid #e2e8f0"
-          }}>
-            <div style={{fontSize: "14px", marginBottom: "6px"}}>
-              <strong>Model:</strong> Projection (Enterprise)
-            </div>
-            <div style={{fontSize: "14px", marginBottom: "6px"}}>
-              <strong>Accuracy:</strong> 94.2% R² score
-            </div>
-            <div style={{fontSize: "14px", marginBottom: "6px"}}>
-              <strong>Items Analyzed:</strong> {data.forecasts.length} SKUs
-            </div>
-            <div style={{fontSize: "14px"}}>
-              <strong>Total Projection Points:</strong> {data.forecasts.reduce((sum, f) => sum + f.forecast.length, 0)}
-            </div>
-          </div>
-        </div>
-
-        {/* Top Forecasts */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#8b5cf6", fontSize: "15px"}}>
-            📊 Top 3 Predicted Items:
-          </strong>
-          <div style={{marginTop: "8px"}}>
-            {data.forecasts.slice(0, 3).map((forecast, index) => {
-              const totalPredicted = forecast.forecast.reduce((sum, day) => sum + day.predictedunits, 0);
-              return (
-                <div key={index} style={{
-                  padding: "10px",
-                  backgroundColor: "#faf5ff",
-                  borderRadius: "6px",
-                  marginBottom: "8px",
-                  border: "1px solid #e9d5ff"
-                }}>
-                  <div style={{fontWeight: "600", fontSize: "14px", color: "#6b21a8"}}>
-                    {forecast.itemname}
-                  </div>
-                  <div style={{fontSize: "13px", color: "#7c3aed"}}>
-                    Predicted: <strong>{Math.round(totalPredicted).toLocaleString()}</strong> units
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Statistical Insights */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#f59e0b", fontSize: "15px"}}>
-            📉 Statistical Insights:
-          </strong>
-          <ul style={{marginLeft: "20px", marginTop: "8px", color: "#475569", fontSize: "14px"}}>
-            <li>Seasonality patterns detected</li>
-            <li>Confidence intervals: 95%</li>
-            <li>Trend analysis: {filterFromDate} to {filterToDate}</li>
-            <li>Real-time responsive forecasting</li>
-          </ul>
-        </div>
-
-        {/* Upgrade CTA */}
-        <div style={{
-          marginTop: "20px",
-          padding: "16px",
-          backgroundColor: "#dbeafe",
-          borderRadius: "8px",
-          textAlign: "center",
-          border: "2px solid #3b82f6"
-        }}>
-          <strong style={{color: "#1e40af"}}>Pro Users</strong> get real-time dashboard updates & downloadable reports
-        </div>
-      </div>
-    );
-    setModalOpen(true);
-  }}
   style={{
     backgroundColor: '#667eea',
     color: 'white',
@@ -5216,118 +4702,6 @@ It enables smarter, data-driven inventory decisions from day one."
                     Implementation roadmap with step-by-step guidance
                   </p>
                   <button 
-  onClick={() => {
-    if (!data.priorityActions || data.priorityActions.length === 0) {
-      setModalTitle("❌ No Priority Actions");
-      setModalContent(
-        <div style={{textAlign: "center", padding: "20px"}}>
-          <p style={{color: "#dc2626", fontSize: "16px"}}>
-            No action items available. Please upload your Excel file to generate priority actions.
-          </p>
-        </div>
-      );
-      setModalOpen(true);
-      return;
-    }
-
-    setModalTitle("🎯 Action Plan - Implementation Roadmap");
-    setModalContent(
-      <div style={{textAlign: "left", lineHeight: "1.8"}}>
-        {/* Header */}
-        <div style={{
-          backgroundColor: "#faf5ff",
-          padding: "16px",
-          borderRadius: "12px",
-          marginBottom: "20px",
-          border: "2px solid #8b5cf6"
-        }}>
-          <h3 style={{margin: "0 0 8px 0", color: "#6b21a8", fontSize: "18px"}}>
-            Step-by-Step Implementation Guide
-          </h3>
-          <p style={{margin: 0, fontSize: "13px", color: "#7c3aed"}}>
-            Based on {data.priorityActions.length} priority actions from your data
-          </p>
-        </div>
-
-        {/* Immediate Actions (High Priority) */}
-        <div style={{ marginBottom: '20px' }}>
-  <strong style={{ color: '#dc2626', fontSize: '16px' }}>
-    Immediate Actions Next 24-48 Hours
-    {data.filterMetadata?.dateRangeApplied?.from && (
-      <span style={{ fontSize: '13px', color: '#666', fontWeight: '400', marginLeft: '12px' }}>
-        ({data.filterMetadata?.filterMessage}) | {data.filterMetadata.dateRangeApplied.from} to {data.filterMetadata.dateRangeApplied.to}
-        ({data.filterMetadata.dateRangeApplied.actualDays} days)
-      </span>
-    )}
-  </strong>
-</div>
-
-
-        {/* Weekly Planning */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#ea580c", fontSize: "15px"}}>
-            📅 Weekly Planning (Medium Priority):
-          </strong>
-          <div style={{
-            marginTop: "8px",
-            padding: "12px",
-            backgroundColor: "#fff7ed",
-            borderRadius: "8px",
-            border: "1px solid #fed7aa"
-          }}>
-            <div style={{fontSize: "14px", color: "#9a3412"}}>
-              {data.priorityActions.filter(a => a.priority === 'MEDIUM').length} items require attention this week
-            </div>
-          </div>
-        </div>
-
-        {/* Implementation Timeline */}
-        <div style={{marginBottom: "20px"}}>
-          <strong style={{color: "#3b82f6", fontSize: "15px"}}>
-            ⏱️ Implementation Timeline:
-          </strong>
-          <ol style={{marginLeft: "20px", marginTop: "10px", color: "#475569", fontSize: "14px", lineHeight: "2"}}>
-            <li><strong>Day 1:</strong> Review high priority items & place urgent orders</li>
-            <li><strong>Days 2-3:</strong> Monitor incoming shipments & update inventory</li>
-            <li><strong>Days 4-5:</strong> Address medium priority restocking</li>
-            <li><strong>Week 2:</strong> Analyze results & adjust forecasts</li>
-          </ol>
-        </div>
-
-        {/* Expected Outcomes */}
-        <div style={{
-          padding: "16px",
-          backgroundColor: "#f0fdf4",
-          borderRadius: "8px",
-          border: "2px solid #22c55e"
-        }}>
-          <strong style={{color: "#166534", fontSize: "15px"}}>
-            ✅ Expected Outcomes:
-          </strong>
-          <ul style={{marginLeft: "20px", marginTop: "8px", color: "#166534", fontSize: "14px"}}>
-            <li>Reduce stockouts by {data.roiData?.stockoutReduction || 75}%</li>
-            <li>Increase revenue by ₹{data.roiData?.projectedIncrease?.toLocaleString()}</li>
-            <li>Save ₹{data.roiData?.inventoryCostSavings?.toLocaleString()} in inventory costs</li>
-          </ul>
-        </div>
-
-        {/* Upgrade CTA */}
-        <div style={{
-          marginTop: "20px",
-          padding: "12px",
-          backgroundColor: "#fef3c7",
-          borderRadius: "8px",
-          textAlign: "center",
-          fontSize: "13px",
-          color: "#92400e",
-          fontWeight: "600"
-        }}>
-          💡 Pro users get weekly automated action plan updates
-        </div>
-      </div>
-    );
-    setModalOpen(true);
-  }}
   style={{
     backgroundColor: '#667eea',
     color: 'white',
@@ -6112,10 +5486,10 @@ It enables smarter, data-driven inventory decisions from day one."
             Special Launch Offer
           </div>
           <div style={{ fontSize: '48px', fontWeight: '900', marginBottom: '4px' }}>
-            ₹1,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
+            ₹2,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
           </div>
           <div style={{ fontSize: '14px', opacity: 0.9 }}>
-            <s>₹2,999/month</s> • Save 33% for first 2 months
+            <s>₹3,599/month</s> • Save 17% 
           </div>
         </div>
 
@@ -6223,9 +5597,6 @@ It enables smarter, data-driven inventory decisions from day one."
           </button>
 
           <button
-            onClick={() => {
-              window.location.href = 'mailto:aptstockapp@gmail.com?subject=Upgrade to Pro Request';
-            }}
             style={{
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
               color: 'white',
@@ -6567,9 +5938,6 @@ It enables smarter, data-driven inventory decisions from day one."
         {/* CTA Buttons */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '20px' }}>
           <button
-            onClick={() => {
-              window.location.href = 'tel:+19000APTSTOCK';
-            }}
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               color: 'white',
@@ -6592,9 +5960,6 @@ It enables smarter, data-driven inventory decisions from day one."
           </button>
 
           <button
-            onClick={() => {
-              window.location.href = 'mailto:aptstockapp@gmail.com?subject=Enterprise Sales Inquiry&body=Hi, I would like to discuss enterprise solutions.';
-            }}
             style={{
               background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
               color: 'white',
@@ -6689,12 +6054,12 @@ const TrialPaywallModal = () => {
       annualPrice: '₹75,000',
       savingsPercent: '17%',
       features: [
-        '✅ Up to 2000 products',
+        '✅ Up to 1500 products',
         '✅ Advanced projections',
         '✅ Priority email support',
-        '✅ 1-year data retention',
-        '✅ Custom integrations',
-        '✅ Dedicated account manager'
+        '✅ 3-months data retention',
+        '✅ Dedicated account manager',
+        '❌ Custom integrations'
       ],
       highlighted: true,
       buttonColor: '#667eea'
@@ -6915,6 +6280,10 @@ const TrialPaywallModal = () => {
                   onClick={() => {
                     if (plan.name === 'STARTER') {
                       // ✅ NEW: only STARTER shows QR image
+                      setShowQR(true);
+                    }
+                    if (plan.name === 'PRO') {
+                      // ✅ NEW: only PRO shows QR image
                       setShowQR(true);
                     } else {
                       // keep existing behaviour (e.g. PRO)
