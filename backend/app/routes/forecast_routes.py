@@ -28,7 +28,7 @@ PLAN_LIMITS = {
         "top_max": 50
     },
     "pro": {
-        "max_skus": 2000,
+        "max_skus": 1500,
         "top_percent": 0.15,
         "top_max": 150
     },
@@ -767,12 +767,18 @@ async def upload_and_process_file(
         visible_inventory = inventory_list
         visible_actions = priority_actions
 
-        if user_role == "admin":
-            visible_inventory = inventory_list
-            visible_actions = priority_actions
-        else:
-            visible_inventory = inventory_list[:limits["max_skus"]] if limits["max_skus"] else inventory_list
-            visible_actions = priority_actions[:limits["max_skus"]] if limits["max_skus"] else priority_actions
+        if user_role != "admin" and limits["max_skus"]:
+
+    # Step 1: take top SKUs from inventory (single source of truth)
+            visible_inventory = inventory_list[:limits["max_skus"]]
+
+            visible_skus = set(i["sku"] for i in visible_inventory)
+
+    # Step 2: filter priority actions using SAME SKUs
+            visible_actions = [
+                a for a in priority_actions
+                if a["sku"] in visible_skus
+            ]
         
         # ============ RESPONSE ============
         response = {
