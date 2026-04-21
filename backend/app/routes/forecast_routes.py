@@ -1097,7 +1097,14 @@ def generate_forecasts_production_ready(
                     )
 
         # Prepare daily sales
-                daily_sales = product_df[['date', 'quantity']].rename(columns={'date':'ds','quantity':'y'})
+                daily_sales = (
+                    product_df
+                    .groupby('date', as_index=False)['quantity']
+                    .sum()
+                )
+
+                daily_sales = daily_sales.rename(columns={'date': 'ds', 'quantity': 'y'})
+                daily_sales = daily_sales.sort_values('ds')
                 daily_sales.columns = ['ds', 'y']
                 daily_sales = daily_sales.sort_values('ds')
 
