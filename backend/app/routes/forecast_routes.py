@@ -83,6 +83,26 @@ def _build_grouped_product_map(df: pd.DataFrame, sku_col: str) -> dict:
         grouped[normalize_sku(sku)] = group
     return grouped
 
+def _parse_flexible_dates(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.strip()
+
+    # Try common Indian/export formats first
+    parsed = pd.to_datetime(s, format="%d-%m-%Y", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], format="%d/%m/%Y", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], format="%Y-%m-%d", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], dayfirst=True, errors="coerce")
+
+    return parsed
+
 # ============================================================================
 # ✅ CSV COLUMN NORMALIZATION - Handles Different CSV Formats
 # ============================================================================
@@ -162,6 +182,7 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
         "pieces": "quantity",
         "pcs": "quantity",
         "count": "quantity",
+        "quantity_sold": "quantity",
 
         # =========================
         # DATE
@@ -247,9 +268,26 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
         "line_amount": "line_revenue",
         "subtotal": "line_revenue",
         "value": "line_revenue",
+
+        # =========================
+        # CURRENT STOCK / INVENTORY
+        # =========================
+        "current_stock": "current_stock",
+        "stock": "current_stock",
+        "stock_on_hand": "current_stock",
+        "stockinhand": "current_stock",
+        "on_hand": "current_stock",
+        "inventory": "current_stock",
+        "closing_stock": "current_stock",
+        "available_stock": "current_stock",
+        "qty_in_hand": "current_stock",
+        "opening_stock": "current_stock",
     }
 
     df = df.rename(columns=lambda c: column_mapping.get(c, c))
+
+    if "current_stock" in df.columns:
+        df["current_stock"] = pd.to_numeric(df["current_stock"], errors="coerce")
 
     # Step 3: create SKU if missing
     if "sku" not in df.columns:
@@ -270,7 +308,7 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
         logger.error("❌ No date column found in CSV")
         raise ValueError("No date column found in CSV")
 
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["date"] = _parse_flexible_dates(df["date"])
     invalid_dates = df["date"].isna().sum()
     if invalid_dates > 0:
         logger.warning(f"⚠️ {invalid_dates} rows with invalid dates dropped")
@@ -1887,8 +1925,16 @@ def generate_inventory_real_from_file(
             cv = float(row['cv'])
             
             # Get pricing
-            unit_cost = float(unit_cost_dict.get(sku, 100)) if unit_cost_dict else 100
-            unit_price = float(unit_price_dict.get(sku, row['csv_unit_price'])) if unit_price_dict else float(row['csv_unit_price'] or 150)
+            raw_cost = unit_cost_dict.get(sku) if unit_cost_dict else None
+            raw_price = unit_price_dict.get(sku) if unit_price_dict and sku in unit_price_dict else row.get("csv_unit_price", np.nan)
+
+            unit_cost = _safe_number(raw_cost, 100.0)
+            unit_price = _safe_number(raw_price, 150.0)
+
+            if unit_cost < 0:
+                unit_cost = 0.0
+            if unit_price <= 0:
+                unit_price = 150.0
             lead_time_days = int(lead_time_dict.get(sku, 3)) if lead_time_dict else 3
             
                         # ================================================================
@@ -2060,11 +2106,14 @@ def generate_inventory_real_from_file(
                 # Financial
                 "unit_cost": round(unit_cost, 2),
                 "unit_price": round(unit_price, 2),
-                "investment_required": int(investment_required),
-                "expected_revenue": int(expected_revenue),
-                "expected_profit": int(expected_profit),
-                "roi_percent": round(roi_percent, 1),
-                "profit_margin_percent": round(((unit_price - unit_cost) / unit_price) * 100, 1),
+                "investment_required": int(round(_safe_number(investment_required, 0))),
+                "expected_revenue": int(round(_safe_number(expected_revenue, 0))),
+                "expected_profit": int(round(_safe_number(expected_profit, 0))),
+                "roi_percent": round(_safe_number(roi_percent, 0), 1),
+                "profit_margin_percent": round(
+                    ((_safe_number(unit_price, 0) - _safe_number(unit_cost, 0)) / _safe_number(unit_price, 1)) * 100,
+                    1
+                ) if _safe_number(unit_price, 0) > 0 else 0.0,
                 
                 # Current stock
                 "has_current_stock": has_current_stock,
