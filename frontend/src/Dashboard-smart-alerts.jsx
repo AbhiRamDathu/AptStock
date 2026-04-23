@@ -3562,7 +3562,7 @@ It enables smarter, data-driven inventory decisions from day one."
         color: '#059669'
       }}>
         ₹{(data.business_insights?.total_profit || 0).toLocaleString()}
-        <ProfitCrad/>
+        
       </div>
       <div style={{
         marginTop: '6px',
@@ -3596,7 +3596,7 @@ It enables smarter, data-driven inventory decisions from day one."
         color: '#ea580c'
       }}>
         ₹{(data.business_insights?.stockout_loss || 0).toLocaleString()}
-        <StockLossCard />
+        
       </div>
       <div style={{
         marginTop: '6px',
@@ -3630,7 +3630,7 @@ It enables smarter, data-driven inventory decisions from day one."
         color: '#2563eb'
       }}>
         ₹{(data.business_insights?.ai_value || 0).toLocaleString()}
-        <AIValueCard />
+        
       </div>
       <div style={{
         marginTop: '6px',
