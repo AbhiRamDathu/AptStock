@@ -3712,7 +3712,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                                                        </div>
                                                                                                                        <div style={{ display: 'flex', gap: '12px' }}>
                                                                                                                          <button
-                                                                                                                           onClick={handleExportHistoricalData}
+                                                                                                                           
                                                                                                                            style={{
                                                                                                                              backgroundColor: '#3b82f6',
                                                                                                                              color: 'white',
@@ -6040,8 +6040,8 @@ const TrialPaywallModal = () => {
       features: [
         '✅ Up to 500 products',
         '✅ Basic projection',
+        '✅ Basic inventory optimization',
         '✅ Email support',
-        '✅ 30-day data retention',
         '❌ Custom integrations',
         '❌ Priority support'
       ],
@@ -6056,9 +6056,9 @@ const TrialPaywallModal = () => {
       features: [
         '✅ Up to 1500 products',
         '✅ Advanced projections',
-        '✅ Priority email support',
-        '✅ 3-months data retention',
-        '✅ Dedicated account manager',
+        '✅ Advanced inventory optimization',
+        '✅ Priority processing speed',
+        '✅ Downloadable insights & reports',
         '❌ Custom integrations'
       ],
       highlighted: true,
