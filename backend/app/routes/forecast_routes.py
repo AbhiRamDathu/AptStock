@@ -282,6 +282,23 @@ def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
         "available_stock": "current_stock",
         "qty_in_hand": "current_stock",
         "opening_stock": "current_stock",
+
+        # =========================
+        # INVOICE / TRANSACTION ID
+        # =========================
+        "invoice_no": "invoice_id",
+        "invoice_number": "invoice_id",
+        "invoice": "invoice_id",
+        "bill_no": "invoice_id",
+        "bill_number": "invoice_id",
+        "bill": "invoice_id",
+        "receipt_no": "invoice_id",
+        "receipt_number": "invoice_id",
+        "txn_id": "invoice_id",
+        "transaction_id": "invoice_id",
+        "transaction_no": "invoice_id",
+        "order_id": "invoice_id",
+        "order_no": "invoice_id",
     }
 
     df = df.rename(columns=lambda c: column_mapping.get(c, c))
@@ -445,8 +462,15 @@ async def preview_csv(
                 sku_col = col
                 break
         
-        if qty_col and item_col:
+        if qty_col and item_col and sku_col:
             grouped = df.groupby([item_col, sku_col])[qty_col].sum().reset_index()
+
+        elif qty_col and item_col:
+            grouped = df.groupby(item_col)[qty_col].sum().reset_index()
+            grouped["sku"] = "N/A"
+
+        else:
+            grouped = pd.DataFrame()
             top_items = grouped.nlargest(5, qty_col)
 
             top_products = [
@@ -569,6 +593,29 @@ async def upload_and_process_file(
             )
         
         sales_column = 'quantity'  # Now standardized
+
+        # ============ EXTRACT CURRENT STOCK FROM UPLOADED FILE ============
+        file_current_stock_dict = {}
+
+        if "current_stock" in df.columns:
+            stock_df = df.dropna(subset=["sku"]).copy()
+            stock_df["current_stock"] = pd.to_numeric(stock_df["current_stock"], errors="coerce")
+            stock_df = stock_df.dropna(subset=["current_stock"])
+
+            if not stock_df.empty:
+                # latest known stock per SKU from uploaded file
+                file_current_stock_dict = {
+                    normalize_sku(sku): float(stock_value)
+                    for sku, stock_value in (
+                        stock_df.sort_values("date")
+                        .groupby("sku")["current_stock"]
+                        .last()
+                        .items()
+                    )
+                }
+
+        # frontend/manual stock overrides file stock if both exist
+        current_stock_dict = {**file_current_stock_dict, **current_stock_dict}
         
         # ============ DATA CLEANING ============
         df = df.sort_values('date')
@@ -1761,32 +1808,74 @@ def generate_inventory_real_from_file(
 # ===================================================================
 
 # Build complete calendar across filtered data range
+        # ===================================================================
+# STEP 2: CALCULATE DAILY-AGGREGATED STATISTICS FOR EACH PRODUCT
+#         ✅ TRUE ZERO-SALE DAYS INCLUDED
+# ===================================================================
+
+# 1) Aggregate actual sold units per SKU per day
         daily_product_sales = (
             df.groupby([date_col, sku_col, item_col], dropna=False)[qty_col]
             .sum()
             .reset_index()
-            .rename(columns={qty_col: 'daily_units'})
+            .rename(columns={qty_col: "daily_units"})
         )
 
-# Product-level stats derived from FULL DAILY series
+# 2) Build full calendar for the filtered date range
+        full_date_range = pd.date_range(
+            start=df[date_col].min(),
+            end=df[date_col].max(),
+            freq="D"
+        )
+
+# 3) Build unique SKU-item pairs
+        sku_item_pairs = (
+            df[[sku_col, item_col]]
+            .drop_duplicates()
+            .copy()
+        )
+
+# 4) Cross join SKU-item pairs with full date range
+        sku_item_pairs["_tmp_key"] = 1
+        calendar_df = pd.DataFrame({date_col: full_date_range})
+        calendar_df["_tmp_key"] = 1
+
+        full_sku_calendar = (
+            sku_item_pairs.merge(calendar_df, on="_tmp_key", how="inner")
+            .drop(columns="_tmp_key")
+        )
+
+# 5) Left join actual sales onto full SKU-date calendar
+        daily_full = (
+            full_sku_calendar.merge(
+                daily_product_sales,
+                on=[date_col, sku_col, item_col],
+                how="left"
+            )
+        )
+
+# 6) Missing dates mean zero sales
+        daily_full["daily_units"] = daily_full["daily_units"].fillna(0.0)
+
+# 7) Product-level stats derived from TRUE full daily series
         product_stats = (
-            daily_product_sales
+            daily_full
             .groupby([sku_col, item_col], dropna=False)
             .agg(
-                total_qty=('daily_units', 'sum'),
-                daily_avg=('daily_units', 'mean'),
-                std_daily=('daily_units', 'std'),
-                days_in_series=('daily_units', 'count'),
-                days_with_sales=('daily_units', lambda s: int((s > 0).sum())),
-                min_daily_qty=('daily_units', 'min'),
-                max_daily_qty=('daily_units', 'max'),
-                first_date=(date_col, 'min'),
-                last_date=(date_col, 'max')
+                total_qty=("daily_units", "sum"),
+                daily_avg=("daily_units", "mean"),
+                std_daily=("daily_units", "std"),
+                days_in_series=("daily_units", "count"),
+                days_with_sales=("daily_units", lambda s: int((s > 0).sum())),
+                min_daily_qty=("daily_units", "min"),
+                max_daily_qty=("daily_units", "max"),
+                first_date=(date_col, "min"),
+                last_date=(date_col, "max")
             )
             .reset_index()
             .rename(columns={
-                sku_col: 'sku',
-                item_col: 'itemname'
+                sku_col: "sku",
+                item_col: "itemname"
             })
         )
 
@@ -2593,8 +2682,14 @@ def calculate_business_metrics_v2(
         date_max = df['date'].max()
         days_span = (date_max - date_min).days + 1
 
-        avg_units_per_transaction = float(df[sales_column].mean()) if total_records > 0 else 0
-        transactions_per_day = total_records / max(days_span, 1)
+        active_days = max(1, int(df["date"].dt.date.nunique()))
+
+        avg_units_per_transaction = 0
+        transactions_per_day = 0
+        avg_transaction_value = 0
+        total_transactions = 0
+
+        has_invoice_level_data = False
 
         revenue_source = 'none'
 
@@ -2616,7 +2711,55 @@ def calculate_business_metrics_v2(
             logger.warning("⚠️ No revenue columns found — returning safe metrics")
         total_revenue = float(revenue_series.sum())
         avg_daily_revenue = total_revenue / max(days_span, 1)
-        avg_transaction_value = total_revenue / total_records if total_records > 0 else 0
+        temp_txn = df.copy()
+        temp_txn["computed_revenue"] = revenue_series
+        temp_txn["quantity_clean"] = pd.to_numeric(temp_txn[sales_column], errors="coerce").fillna(0)
+
+        if "invoice_id" in temp_txn.columns:
+            temp_txn["invoice_id_clean"] = (
+                temp_txn["invoice_id"]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+            )
+
+    # remove fake/empty invoice ids
+            temp_txn["invoice_id_clean"] = temp_txn["invoice_id_clean"].replace(
+                {"": np.nan, "NAN": np.nan, "NONE": np.nan, "NULL": np.nan}
+            )
+
+            has_invoice_level_data = temp_txn["invoice_id_clean"].notna().any()
+        else:
+            temp_txn["invoice_id_clean"] = np.nan
+            has_invoice_level_data = False
+
+        if has_invoice_level_data:
+            invoice_summary = (
+                temp_txn.dropna(subset=["invoice_id_clean"])
+                .groupby("invoice_id_clean", dropna=False)
+                .agg(
+                    transaction_revenue=("computed_revenue", "sum"),
+                    transaction_units=("quantity_clean", "sum"),
+                    transaction_date=("date", "min"),
+                )
+                .reset_index()
+            )
+
+            total_transactions = int(len(invoice_summary))
+            avg_transaction_value = (
+                float(invoice_summary["transaction_revenue"].mean())
+                if total_transactions > 0 else 0
+            )
+            avg_units_per_transaction = (
+                float(invoice_summary["transaction_units"].mean())
+                if total_transactions > 0 else 0
+            )
+            transactions_per_day = total_transactions / active_days if active_days > 0 else 0
+        else:
+            total_transactions = 0
+            avg_transaction_value = 0
+            avg_units_per_transaction = 0
+            transactions_per_day = 0
 
         midpoint = date_min + pd.Timedelta(days=days_span // 2)
 
@@ -2666,9 +2809,9 @@ def calculate_business_metrics_v2(
             'revenue_per_product': _safe_number(revenue_per_product, 0),
             'avg_units_per_transaction': _safe_number(round(avg_units_per_transaction, 2), 0),
             'transactions_per_day': _safe_number(round(transactions_per_day, 2), 0),
-            'total_transactions': int(total_records),
+            'total_transactions': int(total_transactions),
             'unique_products': int(unique_products),
-            'days_analyzed': int(days_span),
+            'days_analyzed': int(active_days),
             'date_range': {
                 'start': date_min.strftime('%Y-%m-%d'),
                 'end': date_max.strftime('%Y-%m-%d')
@@ -2694,6 +2837,7 @@ def calculate_business_metrics_v2(
             'days_analyzed': 0,
             'date_range': {'start': None, 'end': None}
         }
+
 # ============================================================================
 # ROI V2
 # ============================================================================
