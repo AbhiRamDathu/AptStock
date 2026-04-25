@@ -921,6 +921,7 @@ async def upload_and_process_file(
             },
 
             "historical": historical_data,
+            "historical_raw": historical_raw,
             "business_metrics": business_metrics,
             "forecasts": visible_forecasts_list,
             "inventory": visible_inventory,
