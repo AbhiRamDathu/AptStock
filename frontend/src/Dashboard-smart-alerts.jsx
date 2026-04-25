@@ -500,9 +500,14 @@ const handleApplyDateFilters = async () => {
     : [],
 
      // ✅ ADD THESE 4 LINES:
-  historical_raw: Array.isArray(response.historical_raw)
-    ? response.historical_raw
-    : [],
+historical_raw: Array.isArray(response.historical_raw)
+  ? response.historical_raw.map(row => ({
+      date: row.date,
+      sku: row.sku,
+      item_name: row.item_name || row.itemname,
+      units_sold: Number(row.units_sold || 0)
+    }))
+  : [],
 
   // Forecasts
   forecasts: Array.isArray(response.forecasts) && response.forecasts.length > 0
@@ -686,9 +691,14 @@ const handleFileUpload = async (event) => {
     : [],
 
     // ✅ ADD THESE 4 LINES:
-  historical_raw: Array.isArray(response.historical_raw)
-    ? response.historical_raw
-    : [],
+historical_raw: Array.isArray(response.historical_raw)
+  ? response.historical_raw.map(row => ({
+      date: row.date,
+      sku: row.sku,
+      item_name: row.item_name || row.itemname,
+      units_sold: Number(row.units_sold || 0)
+    }))
+  : [],
   
   // Forecasts - now with accuracy metrics
   forecasts: Array.isArray(response.forecasts) && response.forecasts.length > 0
@@ -3712,7 +3722,6 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                                                        </div>
                                                                                                                        <div style={{ display: 'flex', gap: '12px' }}>
                                                                                                                          <button
-                                                                                                                           
                                                                                                                            style={{
                                                                                                                              backgroundColor: '#3b82f6',
                                                                                                                              color: 'white',
@@ -5486,10 +5495,10 @@ It enables smarter, data-driven inventory decisions from day one."
             Special Launch Offer
           </div>
           <div style={{ fontSize: '48px', fontWeight: '900', marginBottom: '4px' }}>
-            ₹2,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
+            ₹1,999<span style={{ fontSize: '24px', fontWeight: '600' }}>/month</span>
           </div>
           <div style={{ fontSize: '14px', opacity: 0.9 }}>
-            <s>₹3,599/month</s> • Save 17% 
+            <s>₹2,999/month</s> • Save 33% for first 1 months 
           </div>
         </div>
 
@@ -5593,7 +5602,7 @@ It enables smarter, data-driven inventory decisions from day one."
               transition: 'all 0.2s'
             }}
           >
-            📞 Call Now
+            📞 Pay Now
           </button>
 
           <button
@@ -6039,9 +6048,9 @@ const TrialPaywallModal = () => {
       savingsPercent: '17%',
       features: [
         '✅ Up to 500 products',
-        '✅ Basic projection',
-        '✅ Basic inventory optimization',
-        '✅ Email support',
+        '✅ Identify fast & slow moving items',
+        '✅ Avoid obvious stock mistakes',
+        '✅ Basic demand insights',
         '❌ Custom integrations',
         '❌ Priority support'
       ],
@@ -6055,17 +6064,17 @@ const TrialPaywallModal = () => {
       savingsPercent: '17%',
       features: [
         '✅ Up to 1500 products',
-        '✅ Advanced projections',
-        '✅ Advanced inventory optimization',
-        '✅ Priority processing speed',
-        '✅ Downloadable insights & reports',
+        '✅ Exact restock recommendations',
+        '✅ When to reorder & how much',
+        '✅ Avoid stock-outs & cash block ',
+        '✅ Profit-focused decisions',
         '❌ Custom integrations'
       ],
       highlighted: true,
       buttonColor: '#667eea'
     },
     {
-      name: 'ENTERPRISE',
+      name: 'For Multi-store / Large Chains (Contact)',
       monthlyPrice: 'Custom',
       annualPrice: 'Custom',
       savingsPercent: null,
@@ -6131,12 +6140,12 @@ const TrialPaywallModal = () => {
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '48px' }}>
           <h1 style={{
-            fontSize: '42px',
+            fontSize: '38px',
             fontWeight: '900',
             margin: '0 0 16px 0',
             color: '#1f2937'
           }}>
-            🎉 Your Free Trial Has Ended
+            🎉 See How Much Money You're Losing in Stock Decisions
           </h1>
           
           <p style={{
@@ -6145,8 +6154,16 @@ const TrialPaywallModal = () => {
             margin: 0,
             fontWeight: '500'
           }}>
-            Unlock unlimited projections, advanced models, and priority support. 
-            Choose your plan and continue optimizing inventory today.
+            Most supermarkets lose sales due to stock-outs and cash gets stuck in slow items.
+AptStock shows exactly what to stock and when — using your own sales data.
+          </p>
+          <p style={{
+            fontSize: '15px',
+            color: '#6b7280',
+            margin: 0,
+            fontWeight: '500'
+          }}>
+            → Most stores recover 3x–5x of subscription cost by avoiding stock mistakes
           </p>
         </div>
 
@@ -6214,6 +6231,12 @@ const TrialPaywallModal = () => {
                 }}>
                   /month
                 </span>
+                <p style={{
+            fontSize: '12px',
+            color: '#6b7280',
+            margin: 0,
+            fontWeight: '500'
+          }}>Recover this cost by fixing just 1–2 stock mistakes</p>
               </div>
 
               {/* Annual Billing Option */}
@@ -6297,7 +6320,7 @@ const TrialPaywallModal = () => {
                     color: 'white',
                     border: 'none',
                     borderRadius: '10px',
-                    fontSize: '16px',
+                    fontSize: '14px',
                     fontWeight: '700',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
@@ -6312,9 +6335,17 @@ const TrialPaywallModal = () => {
                     e.target.style.boxShadow = `0 4px 12px rgba(0, 0, 0, 0.15)`;
                   }}
                 >
-                  🚀 Choose {plan.name}
+                  🚀 Analyze My Store Now ({plan.name})
                 </button>
               )}
+              <p style={{
+            fontSize: '11px',
+            color: '#6b7280',
+            margin: 0,
+            marginLeft:'45px',
+            marginTop: '4px',
+            fontWeight: '500'
+            }}>Every day delay = lost sales + blocked cash</p>
             </div>
           ))}
         </div>
@@ -6334,6 +6365,15 @@ const TrialPaywallModal = () => {
             fontWeight: '500'
           }}>
             🔒 Secure payment • 🛡️ 100% data protection • 📧 Money-back guarantee
+          </p>
+          <p style={{
+            fontSize: '15px',
+            color: '#6b7280',
+            margin: 0,
+            fontWeight: '500'
+          }}>
+            Try with your own data.
+If you don’t see clear stock decisions in 7 days — don’t continue.
           </p>
         </div>
 
