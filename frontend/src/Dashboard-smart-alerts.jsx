@@ -1738,6 +1738,12 @@ const showPaymentQr = () => {
   }
 
   try {
+    const cleanText = (value) =>
+  String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/,/g, ' ')
+    .trim();
+    
     const headers = [
   'SKU',
   'Item_Name',
@@ -1751,15 +1757,15 @@ const showPaymentQr = () => {
 ];
 
    const csvRows = data.priorityActions.map(item => [
-  item.sku,
-  item.item_name || item.itemname || '',
-  item.priority_level || item.priority || item.risk_level || 'MEDIUM',
+  cleanText(item.sku),
+  cleanText(item.item_name || item.itemname || ''),
+  cleanText(item.priority_level || item.priority || item.risk_level || 'MEDIUM'),
   item.daily_demand || item.daily_sales_avg || item.daily_sales || 0,
   item.recommended_stock_7_days || 0,
   item.recommended_stock_15_days || item.recommended_stock || 0,
   item.revenue_risk || item.revenue_risk_rupees || 0,
   item.roi_percent || item.roi || 0,
-  item.recommendedaction || item.description || item.action_required || item.status || ''
+  cleanText(item.recommendedaction || item.description || item.action_required || item.status || '')
 ]);
 
     const csvContent = [headers, ...csvRows]
@@ -3722,6 +3728,7 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                                                        </div>
                                                                                                                        <div style={{ display: 'flex', gap: '12px' }}>
                                                                                                                          <button
+                                                                                                                         onClick={handleExportHistoricalData}
                                                                                                                            style={{
                                                                                                                              backgroundColor: '#3b82f6',
                                                                                                                              color: 'white',
