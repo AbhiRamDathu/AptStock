@@ -2426,7 +2426,7 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 else:
                     # LOW: Monitor only
                     priority = "🟢 LOW"
-                    action = "👁️ Monitor Stock"
+                    action = "👁️ Monitor Stock (Stable but High Value)"
                     urgency = 20
                     reason = f"Healthy stock ({stock_percentage:.1f}%) with stable demand ({daily_sales_avg:.1f}/day)"
                     check_freq = "Bi-weekly"
@@ -2456,7 +2456,7 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 else:
                     # Low demand
                     priority = "🟢 LOW"
-                    action = "👁️ Monitor"
+                    action = "👁️ Monitor (Stable but High Value)"
                     urgency = 25
                     reason = f"Low demand ({daily_sales_avg:.1f}/day)"
                     check_freq = "Bi-weekly"
