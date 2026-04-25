@@ -6154,7 +6154,7 @@ const TrialPaywallModal = () => {
             margin: 0,
             fontWeight: '500'
           }}>
-            Most supermarkets lose sales due to stock-outs and cash gets stuck in slow items.
+            Most stores lose sales due to stock-outs and cash gets stuck in slow items.
 AptStock shows exactly what to stock and when — using your own sales data.
           </p>
           <p style={{
