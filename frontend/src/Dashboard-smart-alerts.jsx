@@ -2227,43 +2227,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
       </div>
 
       {/* Security Certificates */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}> {/* FIXED: uniform 8px gap */}
-        <div style={{
-          backgroundColor: '#f1f5f9',
-          border: '1px solid #cbd5e1',
-          borderRadius: '8px',
-          padding: '8px 14px', /* FIXED: consistent padding */
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px' /* FIXED: consistent gap */
-        }}>
-          
-        </div>
-        
-        <div style={{
-          backgroundColor: '#f1f5f9',
-          border: '1px solid #cbd5e1',
-          borderRadius: '8px',
-          padding: '8px 14px', /* FIXED: consistent padding */
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px'
-        }}>
-          
-        </div>
-        
-        <div style={{
-          backgroundColor: '#f1f5f9',
-          border: '1px solid #cbd5e1',
-          borderRadius: '8px',
-          padding: '8px 14px', /* FIXED: consistent padding */
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px'
-        }}>
-          
-        </div>
-      </div>
+      
     </div>
 
     {/* Right Section - CTA Buttons */}
