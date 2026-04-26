@@ -85,6 +85,15 @@ const [modalContent, setModalContent] = useState(null);
   const [priorityActions, setPriorityActions] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
   const [activeView, setActiveView] = useState(null);
+
+  const [trialStartDate, setTrialStartDate] = useState(() => {
+  return localStorage.getItem("aptstock_trial_start") || null;
+});
+
+const [trialDay, setTrialDay] = useState(1);
+const [trialDaysLeft, setTrialDaysLeft] = useState(7);
+const [cumulativeValueFound, setCumulativeValueFound] = useState(0);
+const [showTrialConversionBanner, setShowTrialConversionBanner] = useState(false);
   
   // Form states
 //  const [selectedStore, setSelectedStore] = useState('Store A');
@@ -216,6 +225,84 @@ useEffect(() => {
   };
 }, []);
 
+useEffect(() => {
+  if (!trialStartDate) return;
+
+  const start = new Date(trialStartDate);
+  const now = new Date();
+
+  const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24)) + 1;
+  const safeDay = Math.min(Math.max(diffDays, 1), 7);
+
+  setTrialDay(safeDay);
+  setTrialDaysLeft(Math.max(7 - safeDay, 0));
+}, [trialStartDate]);
+
+useEffect(() => {
+  const actions = data?.priorityActions || [];
+
+  const value = actions.reduce((sum, action) => {
+    const salesValue =
+      Number(action.investmentrequired) ||
+      Number(action.expected_revenue) ||
+      Number(action.estimatedrevenueloss) ||
+      0;
+
+    return sum + salesValue;
+  }, 0);
+
+  setCumulativeValueFound(value);
+}, [data?.priorityActions]);
+
+const startTrialIfNeeded = () => {
+  if (!localStorage.getItem("aptstock_trial_start")) {
+    const today = new Date().toISOString();
+    localStorage.setItem("aptstock_trial_start", today);
+    setTrialStartDate(today);
+  }
+};
+
+const formatMoneyShort = (value) => {
+  const amount = Number(value || 0);
+
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+  return `₹${amount.toLocaleString("en-IN")}`;
+};
+
+const getActionSalesValue = (action) => {
+  return (
+    Number(action.investmentrequired) ||
+    Number(action.expected_revenue) ||
+    Number(action.estimatedrevenueloss) ||
+    Number(action.revenue_risk) ||
+    Number(action.revenue_risk_rupees) ||
+    0
+  );
+};
+
+const hasCurrentStockForAction = (action) => {
+  return (
+    action.has_current_stock === true &&
+    action.current_stock !== null &&
+    action.current_stock !== undefined
+  );
+};
+
+const getDaysToStockout = (action) => {
+  if (!hasCurrentStockForAction(action)) return null;
+
+  const currentStock = Number(action.current_stock || 0);
+  const dailySales =
+    Number(action.daily_sales) ||
+    Number(action.daily_sales_avg) ||
+    Number(action.daily_demand) ||
+    0;
+
+  if (!dailySales || dailySales <= 0) return null;
+
+  return Math.max(1, Math.floor(currentStock / dailySales));
+};
   
   // Update step status
   const updateStepStatus = (stepId, status) => {
@@ -665,7 +752,10 @@ const handleFileUpload = async (event) => {
     
     setData(response);   // ✅ correct
     setHasUploadedFile(true);  // ✅ MAKE SURE THIS IS SET
-    
+
+    startTrialIfNeeded();
+    setShowTrialConversionBanner(true);
+
     // ✅ Force component re-render
     setChartRefreshKey(prev => prev + 1);
     
@@ -2147,15 +2237,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           alignItems: 'center',
           gap: '6px' /* FIXED: consistent gap */
         }}>
-          <span style={{ fontSize: '14px' }}>🔒</span>
-          <span style={{
-            fontSize: '12px',
-            fontWeight: '600',
-            color: '#475569',
-            letterSpacing: '0.2px' /* FIXED: reduced letter spacing */
-          }}>
-            256-bit SSL
-          </span>
+          
         </div>
         
         <div style={{
@@ -2167,15 +2249,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           alignItems: 'center',
           gap: '6px'
         }}>
-          <span style={{ fontSize: '14px' }}>⚡</span>
-          <span style={{
-            fontSize: '12px',
-            fontWeight: '600',
-            color: '#475569',
-            letterSpacing: '0.2px'
-          }}>
-            SOC-2
-          </span>
+          
         </div>
         
         <div style={{
@@ -2187,15 +2261,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           alignItems: 'center',
           gap: '6px'
         }}>
-          <span style={{ fontSize: '14px' }}>🛡️</span>
-          <span style={{
-            fontSize: '12px',
-            fontWeight: '600',
-            color: '#475569',
-            letterSpacing: '0.2px'
-          }}>
-            GDPR
-          </span>
+          
         </div>
       </div>
     </div>
@@ -3668,140 +3734,471 @@ It enables smarter, data-driven inventory decisions from day one."
   </div>
 )}
 
-                                   
-                                                                                                         
-                                                                         {/* FIXED: Historical Sales Analysis with working export button */}
-                                                                         {hasUploadedFile && historicalChartWithItems && historicalChartWithItems.length > 0 && (
-                                                                                                                   <div style={{
-                                                                                                                     backgroundColor: 'white',
-                                                                                                                     borderRadius: '12px',
-                                                                                                                     boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                                                                                                     marginBottom: '24px',
-                                                                                                                     border: '1px solid #e2e8f0'
-                                                                                                                   }}>
-                                                                                                                     <div style={{
-                                                                                                                       borderBottom: '1px solid #e5e7eb',
-                                                                                                                       padding: '20px 24px',
-                                                                                                                       display: 'flex',
-                                                                                                                       justifyContent: 'space-between',
-                                                                                                                       alignItems: 'center'
-                                                                                                                     }}>
-                                                                                                                       <div>
-                                                                                                                         <h3 style={{
-  fontSize: '20px',
-  fontWeight: '700',
-  margin: '0 0 4px 0',
-  color: '#1f2937'
-}}>
- 📊 Historical Sales Analysis
-  {data.filterMetadata?.dateRangeApplied?.from && (
-    <span style={{ fontSize: '13px', color: '#666', fontWeight: '400', marginLeft: '8px' }}>
-      ({data.filterMetadata.dateRangeApplied.from} to {data.filterMetadata.dateRangeApplied.to})
-    </span>
-  )}
-</h3>
-<div style={{ fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
-  Based on your uploaded data
-  {data.filterMetadata?.recordsRemoved > 0 && (
-    <span style={{ color: '#ef4444' }}>
-      {' '}({data.filterMetadata.recordsRemoved} removed by filter)
-    </span>
-  )}
+{hasUploadedFile && (
+  <div style={{
+    background: trialDay >= 5
+      ? 'linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)'
+      : 'linear-gradient(135deg, #111827 0%, #1e40af 100%)',
+    color: 'white',
+    borderRadius: '16px',
+    padding: '22px 28px',
+    marginBottom: '20px',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '20px'
+  }}>
+    <div>
+      <div style={{ fontSize: '14px', fontWeight: 700, opacity: 0.9 }}>
+        7-Day Store Stock Trial • Day {trialDay}/7
+      </div>
+
+      <div style={{ fontSize: '24px', fontWeight: 900, marginTop: '6px' }}>
+        {formatMoneyShort(cumulativeValueFound)} total opportunity found — start with the top items below
+      </div>
+
+      <div style={{ fontSize: '14px', marginTop: '6px', opacity: 0.9 }}>
+        {trialDay < 5
+  ? 'Track this daily. Compare AptStock recommendations with actual sales tomorrow.'
+  : `Only ${trialDaysLeft} day(s) left. After trial ends, money-at-risk alerts and purchase guidance stop.`}
+      </div>
+    </div>
+
+    <button
+      onClick={() => setShowUpgradeModal(true)}
+      style={{
+        backgroundColor: '#f59e0b',
+        color: 'white',
+        border: 'none',
+        borderRadius: '10px',
+        padding: '12px 20px',
+        fontSize: '15px',
+        fontWeight: 800,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap'
+      }}
+    >
+      {trialDay < 5 ? 'See Paid Plans' : 'Keep These Alerts Active'}
+    </button>
+  </div>
+)}
+
+{/* ✅ FIXED: Normal UI for Priority Actions with REAL item names */}
+                                                                      {data.priorityActions && data.priorityActions.length > 0 && (
+                                                                        <div style={{
+                                                                          backgroundColor: 'white',
+                                                                          padding: '32px',
+                                                                          borderRadius: '16px',
+                                                                          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+                                                                          marginBottom: '32px'
+                                                                        }}>
+                                                                          <div style={{
+                                                                            display: 'flex',
+                                                                            justifyContent: 'space-between',
+                                                                            alignItems: 'center',
+                                                                            marginBottom: '24px'
+                                                                          }}>
+                                                                            <div>
+                                                                              <h3 style={{
+                                                                                fontSize: '20px',
+                                                                                fontWeight: '700',
+                                                                                margin: '0',
+                                                                                color: '#1f2937'
+                                                                              }}>
+                                                                                🚨 Money-at-Risk Stock Actions
+                                                                              </h3>
+                                                                              <p style={{
+                                                                                color: '#6b7280',
+                                                                                fontSize: '14px',
+                                                                                margin: '4px 0 0 0'
+                                                                              }}>
+                                                                                Your highest-risk products ranked by expected demand, sales value, and restock urgency. • Date range: {filterFromDate} to {filterToDate}
+                                                                              </p>
+                                                                            </div>
+                                                                            
+                                                                            <button
+                                                                              onClick={(handleExportPriorityActions)}
+                                                                              style={{
+                                                                                backgroundColor: '#dc2626',
+                                                                                color: 'white',
+                                                                                padding: '10px 20px',
+                                                                                border: 'none',
+                                                                                borderRadius: '8px',
+                                                                                fontWeight: '600',
+                                                                                cursor: 'pointer',
+                                                                                fontSize: '14px'
+                                                                              }}
+                                                                            >
+                                                                              📊 Export Actions
+                                                                            </button>
+                                                                          </div>
+                                                                          
+                                                                          {/* ✅ FIXED: Simple list layout showing REAL item names */}
+                                                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                                                            {data.priorityActions.map((action, index) => {
+                                                                              const currentStock =
+  action.current_stock ??
+  action.currentstock ??
+  action.stock_available ??
+  null;
+
+const hasCurrentStock =
+  action.has_current_stock === true &&
+  currentStock !== null &&
+  currentStock !== undefined;
+
+const salesValueAtRisk = getActionSalesValue(action);
+const daysToStockout = getDaysToStockout(action);
+
+                                                                              return (
+                                                                              <div key={index} style={{
+                                                                                padding: '20px',
+                                                                                border: action.priority === 'HIGH' ? '2px solid #fecaca' : '2px solid #fed7aa',
+                                                                                borderRadius: '12px',
+                                                                                backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed'
+                                                                              }}>
+                                                                                <div style={{
+                                                                                  display: 'flex',
+                                                                                  justifyContent: 'space-between',
+                                                                                  alignItems: 'flex-start'
+                                                                                }}>
+                                                                                  <div style={{ flex: 1 }}>
+                                                                                    <div style={{
+                                                                                      fontSize: '16px',
+                                                                                      fontWeight: '700',
+                                                                                      color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                                                                      marginBottom: '8px'
+                                                                                    }}>
+                                                                                       {action.action}
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#1f2937',
+                                                                                      fontWeight: '600',
+                                                                                      marginBottom: '8px'
+                                                                                    }}>
+                                                                                      {/* ✅ SHOW REAL ITEM NAME from uploaded file */}
+                                                                                      📦 {action.itemname || action.sku}
+                                                                                      <span style={{ color: '#6b7280', fontWeight: '400', fontSize: '12px' }}>
+                                                                                        {action.sku && action.itemname && ` (${action.sku})`}
+                                                                                      </span>
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#374151',
+                                                                                      marginBottom: '12px',
+                                                                                    }}>
+                                                                                      
+                                                                                    </div>
+                                                                                    <div style={{
+                                                                                      fontSize: '14px',
+                                                                                      color: '#6b7280',
+                                                                                      marginTop: '-5px',
+                                                                                      marginBottom: '6px',
+                                                                                      fontWeight: '500'
+                                                                                    }}>
+                                                                                      <div>
+  📦 Recommended Stock for next 7 days: <strong>{
+    action.recommended_stock_7_days != null
+      ? Number(action.recommended_stock_7_days).toLocaleString()
+      : (
+          action.recommendedaction?.match(/next 7 days:\s*([0-9.]+)/i)?.[1]
+            ? Number(action.recommendedaction.match(/next 7 days:\s*([0-9.]+)/i)[1]).toLocaleString()
+            : 'N/A'
+        )
+  }</strong> units
 </div>
-
+                                                                                      🚨 Expected demand for next 15 days: <strong>{action.recommended_stock?.toLocaleString() || 'N/A'}</strong> units, <div
+                                                                                      style={{
+                                                                                        marginTop: '2px',
+                                                                                        fontWeight: '',
+                                                                                      }}
+                                                                                      > </div>
+                                                                                    </div>
+                                                                                    {hasCurrentStock ? (
+  <div style={{ marginTop: '8px', color: '#065f46', fontWeight: '600' }}>
+    ✅ Stock-aware mode: Current stock available is <strong>{Number(currentStock).toLocaleString()}</strong> units.
+  </div>
+) : (
+  <div style={{ marginTop: '8px', color: '#92400e', fontWeight: '600' }}>
+    ℹ️ Sales-only mode: This recommendation is based on sales demand. Add current stock for exact shortage and reorder urgency.
+  </div>
+)}
+{daysToStockout && (
+  <div style={{
+    marginTop: '6px',
+    color: daysToStockout <= 3 ? '#dc2626' : '#92400e',
+    fontWeight: '700',
+    fontSize: '14px'
+  }}>
+    ⏳ Estimated stockout in {daysToStockout} day(s)
+  </div>
+)}
+                                                                                    <div style={{
+                                                                                      fontSize: '12px',
+                                                                                      color: '#6b7280'
+                                                                                    }}>
+                                                                                        
+                                                                                      <div style={{
+                                                                                        fontSize: "14px",
+  marginTop: '10px',
+  padding: '10px 14px',
+  backgroundColor: '#ECFDF5',
+  borderRadius: '8px',
+  border: '1px solid #10B981'
+}}>
+  <strong style={{ color: '#065F46', fontWeight:'600', fontSize: '15px' }}>
+    💰 Expected Sales Value (Next 15 Days): ₹{action.investmentrequired?.toLocaleString() || '0'}
+  </strong>
+</div>
 <div style={{
-                                                                                                                           fontSize: '16px',
-                                                                                                                           color: '#6b7280',
-                                                                                                                           fontWeight: '500',
-                                                                                                                           marginTop: '5px',
-                                                                                                                         }}>
-                                                                                                                           Based on proprietary In algorithms •  Data-driven analysis using internal algorithms
-                                                                                                                         </div>
+  marginTop: '10px',
+  padding: '10px 14px',
+  backgroundColor: '#FEF2F2',
+  borderRadius: '8px',
+  border: '1px solid #FCA5A5',
+  color: '#991B1B',
+  fontSize: '14px',
+  fontWeight: '700'
+}}>
+  ⚠️ This item alone can cost you up to {formatMoneyShort(salesValueAtRisk)} in missed sales.
+</div>
+<div style={{marginTop: '3px', fontSize: '13px'}}>📊 Based on your store’s average sales (<strong>{action.daily_sales?.toFixed(1) || 'N/A'}</strong> units/day)</div>
+                                                                                    </div>
+                                                                                  </div>
+                                                                                  
+                                                                                    {/* Revenue Risk & Stock Details */}
+  
 
-<div  style={{fontSize: '14 px', marginTop: '-2px'}}/>
-  {data.filterMetadata?.filterMessage && (
-    <span style={{ color: '#667eea' }}>✅ {data.filterMetadata.filterMessage}</span>
-  )}
-  <div />
+  
 
+  {/* Revenue Risk Calculation */}
+ 
 
-                                                                                                                       </div>
-                                                                                                                       <div style={{ display: 'flex', gap: '12px' }}>
-                                                                                                                         <button
-                                                                                                                         onClick={handleExportHistoricalData}
-                                                                                                                           style={{
-                                                                                                                             backgroundColor: '#3b82f6',
-                                                                                                                             color: 'white',
-                                                                                                                             border: 'none',
-                                                                                                                             padding: '8px 16px',
-                                                                                                                             borderRadius: '6px',
-                                                                                                                             fontSize: '14px',
-                                                                                                                             fontWeight: '600',
-                                                                                                                             cursor: 'pointer'
-                                                                                                                           }}
-                                                                                                                         >
-                                                                                                                           📥 Export Data
-                                                                                                                         </button>
-                                                                                                                         <button 
-                                     
+                                                                                </div>
+                                                                                
+                                                                                <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                                                                                  <button
+                                                                                  onClick={() => {
+  if (trialDay <= 4) {
+    setModalTitle("🧾 Why this restock action matters");
+    setModalContent(
+      <div style={{ lineHeight: 1.7 }}>
+        <p><strong>Product:</strong> {action.itemname || action.sku}</p>
+        <p><strong>Expected 15-day demand:</strong> {action.recommended_stock?.toLocaleString() || 'N/A'} units</p>
+        <p><strong>Expected sales value:</strong> ₹{action.investmentrequired?.toLocaleString() || '0'}</p>
+        <p>This is the decision AptStock wants you to verify during your trial. Compare it with actual movement over the next 2–3 days.</p>
+      </div>
+    );
+    setModalOpen(true);
+  } else {
+    setShowUpgradeModal(true);
+  }
+}} 
                                      style={{
-                                       backgroundColor: '#8b5cf6',
+                                       backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#F97316',
                                        color: 'white',
-                                       border: 'none',
                                        padding: '8px 16px',
+                                       border: 'none',
                                        borderRadius: '6px',
-                                       fontSize: '14px',
                                        fontWeight: '600',
-                                       cursor: 'pointer'
+                                       cursor: 'pointer',
+                                       fontSize: '12px'
                                      }}
                                    >
-                                     View Insights
+                                     {trialDay <= 4 ? '🧾 See Why This Matters' : '🔒 Unlock Exact Reorder Qty'}
                                    </button>
                                    
-                                                                                                                       </div>
-                                                                                                                     </div>
-                                                                                                                     <div style={{ padding: '24px' }}>
-                                                                                                                       <ResponsiveContainer width="100%" height={300} key={`historical-with-items-${chartRefreshKey}`}>
-                                                                                                                         <LineChart data={historicalChartWithItems}>
-                                                                                                                           <CartesianGrid strokeDasharray="3 3" />
-                                                                                                                           <XAxis 
-                                                                                                                             dataKey="displayDate" 
-                                                                                                                             angle={-45}
-                                                                                                                             textAnchor="end"
-                                                                                                                             height={60}
-                                                                                                                             interval={Math.max(0, Math.floor(historicalChartWithItems.length / 12))}
-                                                                                                                             tick={{ fontSize: 12 }}
-                                                                                                                           />
-                                                                                                                           <YAxis />
-                                                                                                                           <Tooltip content={<CustomHistoricalTooltip />} />
-                                                                                                                           <Line 
-                                                                                                                             type="monotone" 
-                                                                                                                             dataKey="totalSales" 
-                                                                                                                             stroke="#3b82f6" 
-                                                                                                                             strokeWidth={2}
-                                                                                                                             dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
-                                                                                                                             name="Total Sales with Items"
-                                                                                                                           />
-                                                                                                                         </LineChart>
-                                                                                                                       </ResponsiveContainer>
-                                                                                                                       
-                                                                                                                       <div style={{
-                                                                                                                         backgroundColor: '#dbeafe',
-                                                                                                                         border: '1px solid #3b82f6',
-                                                                                                                         padding: '12px',
-                                                                                                                         borderRadius: '8px',
-                                                                                                                         marginTop: '16px',
-                                                                                                                         fontSize: '14px',
-                                                                                                                         color: '#1d4ed8',
-                                                                                                                         textAlign: 'center'
-                                                                                                                       }}>
-                                                                                                                         📊 Showing {historicalChartWithItems.length} historical data points for range {filterFromDate} to {filterToDate} | Hover over points to see item details | Peer benchmark: You're performing 23% above average
-                                                                                                                       </div>
-                                                                                                                     </div>
-                                                                                                                   </div>
-                                                                            )}
-                                                                                                         
-                                                                           {/* FIXED: AI Forecast Results with FULL date range coverage - EXACT SCREENSHOT MATCH */}
+                                                                                  
+                                                                                  <button 
+                                     style={{
+                                       backgroundColor: 'transparent',
+                                       color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
+                                       padding: '8px 16px',
+                                       border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
+                                       borderRadius: '6px',
+                                       fontWeight: '600',
+                                       cursor: 'pointer',
+                                       fontSize: '12px'
+                                     }}
+                                   >
+                                     📥 Download Supplier List
+                                   </button>
+                                   
+                                                                                </div>
+                                                                              </div>
+                                                                            )})}
+                                                                          </div>
+                                                                          
+                                                                          <div style={{
+                                                                            marginTop: '20px',
+                                                                            padding: '16px',
+                                                                            backgroundColor: '#fef2f2',
+                                                                            borderRadius: '12px',
+                                                                            border: '2px solid #dc2626'
+                                                                          }}>
+                                                                            <p style={{
+                                                                              color: '#dc2626',
+                                                                              fontWeight: '600',
+                                                                              margin: 0,
+                                                                              fontSize: '14px'
+                                                                            }}>
+                                                                              🚨 AptStock found {data.priorityActions.length} stock decisions needing attention •
+Total visible sales value: {formatMoneyShort(cumulativeValueFound)} •
+Date range: {filterFromDate} to {filterToDate} •
+Keep tracking daily during trial to compare recommendation vs actual sales.
+                                                                            </p>
+                                                                          </div>
+                                                                        </div>
+                                                                      )}
+
+                                                                      {/* FIXED: Normal UI for Inventory Recommendations with REAL item names */}
+{data.inventory && data.inventory.length > 0 && (
+  <div style={{
+    backgroundColor: 'white',
+    padding: '32px',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+    marginBottom: '32px'
+  }}>
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '24px'
+    }}>
+      <div>
+        <h3 style={{
+          fontSize: '20px',
+          fontWeight: '700',
+          margin: '0',
+          color: '#1f2937'
+        }}>
+          📦 Inventory Recommendations
+        </h3>
+        <p style={{
+          color: '#6b7280',
+          fontSize: '14px',
+          margin: '4px 0 0 0'
+        }}>
+          Stock recommendations based on your uploaded sales data • Date range: {filterFromDate} to {filterToDate}
+        </p>
+      </div>
+      
+      <button
+        onClick={(handleExportInventoryData)}
+        style={{
+          backgroundColor: '#8b5cf6',
+          color: 'white',
+          padding: '10px 20px',
+          border: 'none',
+          borderRadius: '8px',
+          fontWeight: '600',
+          cursor: 'pointer',
+          fontSize: '14px'
+        }}
+      >
+        📊 Export Inventory
+      </button>
+    </div>
+    
+    {/* ✅ FIXED: Simple table layout showing REAL item names */}
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: '14px'
+      }}>
+        <thead>
+          <tr style={{ backgroundColor: '#f8fafc' }}>
+            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Item Name</th>
+            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>SKU</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended Stock</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Minimum Safety Stock</th>
+            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Level</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.inventory.map((item, index) => {
+            // ✅ SMART FIX: Calculate risk dynamically with proper fallback
+            // ✅ STEP 1: Get risk_level from backend first
+          let status = null;
+
+// Priority 1: Backend-calculated risk_level (MOST RELIABLE)
+          if (item.risk_level && ['HIGH', 'MEDIUM', 'LOW'].includes(item.risk_level)) {
+            status = item.risk_level;
+}
+// Priority 2: Fallback to demand_speed if risk_level unavailable
+          else if (item.demand_speed) {
+          if (item.demand_speed === 'FAST') {
+            status = 'HIGH';
+        } else if (item.demand_speed === 'MEDIUM') {
+            status = 'MEDIUM';
+        } else if (item.demand_speed === 'LOW') {
+            status = 'LOW';
+        }
+        }
+// Priority 3: Ultimate fallback
+          else {
+            status = 'MEDIUM';
+          }
+
+        
+            
+            return (
+              <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '12px', fontWeight: '600', color: '#1f2937' }}>
+                  {item.itemname || item.item_name || item.sku}
+                </td>
+                <td style={{ padding: '12px', color: '#6b7280', fontSize: '12px' }}>{item.sku}</td>
+                
+                <td style={{ padding: '12px', color: '#374151', fontWeight: '600', textAlign: 'center' }}>{item.recommendedstock || item.recommended_stock}</td>
+                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.safetystock || item.safety_stock}</td>
+                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.reorderpoint || item.reorder_point}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+    
+    <div style={{
+      marginTop: '20px',
+      padding: '16px',
+      backgroundColor: '#f0f9ff',
+      borderRadius: '12px',
+      border: '2px solid #0ea5e9'
+    }}>
+      <p style={{
+        color: '#0ea5e9',
+        fontWeight: '600',
+        margin: 0,
+        fontSize: '14px'
+      }}>
+        📊 Recommendations based on {data.historical?.length || 0} records from uploaded file • 
+        Date range: <strong>{filterFromDate} to {filterToDate}</strong> • 
+        High Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'HIGH';
+          if (i.days_of_stock !== undefined) return i.days_of_stock <= 3;
+          return false;
+        }).length} | 
+        Medium Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'MEDIUM';
+          if (i.days_of_stock !== undefined) return i.days_of_stock > 3 && i.days_of_stock <= 10;
+          return false;
+        }).length} | 
+        Low Risk: {data.inventory.filter(i => {
+          if (i.risk_level) return i.risk_level === 'LOW';
+          if (i.days_of_stock !== undefined) return i.days_of_stock > 15;
+          return false;
+        }).length}
+      </p>
+    </div>
+  </div>
+)}
+
+{/* FIXED: AI Forecast Results with FULL date range coverage - EXACT SCREENSHOT MATCH */}
 {hasUploadedFile && data?.forecasts && data.forecasts.length > 0 && (
   <div style={{ 
     backgroundColor: 'white', 
@@ -4156,378 +4553,138 @@ It enables smarter, data-driven inventory decisions from day one."
     </div>
   </div>
 )}
-                                   
-                                                                                                         
-                                                                         {/* FIXED: Normal UI for Inventory Recommendations with REAL item names */}
-{data.inventory && data.inventory.length > 0 && (
-  <div style={{
-    backgroundColor: 'white',
-    padding: '32px',
-    borderRadius: '16px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-    marginBottom: '32px'
-  }}>
-    <div style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '24px'
-    }}>
-      <div>
-        <h3 style={{
-          fontSize: '20px',
-          fontWeight: '700',
-          margin: '0',
-          color: '#1f2937'
-        }}>
-          📦 Inventory Recommendations
-        </h3>
-        <p style={{
-          color: '#6b7280',
-          fontSize: '14px',
-          margin: '4px 0 0 0'
-        }}>
-          Stock recommendations based on your uploaded sales data • Date range: {filterFromDate} to {filterToDate}
-        </p>
-      </div>
-      
-      <button
-        onClick={(handleExportInventoryData)}
-        style={{
-          backgroundColor: '#8b5cf6',
-          color: 'white',
-          padding: '10px 20px',
-          border: 'none',
-          borderRadius: '8px',
-          fontWeight: '600',
-          cursor: 'pointer',
-          fontSize: '14px'
-        }}
-      >
-        📊 Export Inventory
-      </button>
-    </div>
-    
-    {/* ✅ FIXED: Simple table layout showing REAL item names */}
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{
-        width: '100%',
-        borderCollapse: 'collapse',
-        fontSize: '14px'
-      }}>
-        <thead>
-          <tr style={{ backgroundColor: '#f8fafc' }}>
-            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Item Name</th>
-            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>SKU</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Recommended Stock</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Minimum Safety Stock</th>
-            <th style={{ padding: '12px',textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#374151' }}>Reorder Level</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.inventory.map((item, index) => {
-            // ✅ SMART FIX: Calculate risk dynamically with proper fallback
-            // ✅ STEP 1: Get risk_level from backend first
-          let status = null;
-
-// Priority 1: Backend-calculated risk_level (MOST RELIABLE)
-          if (item.risk_level && ['HIGH', 'MEDIUM', 'LOW'].includes(item.risk_level)) {
-            status = item.risk_level;
-}
-// Priority 2: Fallback to demand_speed if risk_level unavailable
-          else if (item.demand_speed) {
-          if (item.demand_speed === 'FAST') {
-            status = 'HIGH';
-        } else if (item.demand_speed === 'MEDIUM') {
-            status = 'MEDIUM';
-        } else if (item.demand_speed === 'LOW') {
-            status = 'LOW';
-        }
-        }
-// Priority 3: Ultimate fallback
-          else {
-            status = 'MEDIUM';
-          }
-
-        
-            
-            return (
-              <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '12px', fontWeight: '600', color: '#1f2937' }}>
-                  {item.itemname || item.item_name || item.sku}
-                </td>
-                <td style={{ padding: '12px', color: '#6b7280', fontSize: '12px' }}>{item.sku}</td>
-                
-                <td style={{ padding: '12px', color: '#374151', fontWeight: '600', textAlign: 'center' }}>{item.recommendedstock || item.recommended_stock}</td>
-                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.safetystock || item.safety_stock}</td>
-                <td style={{ padding: '12px', color: '#374151', textAlign: 'center' }}>{item.reorderpoint || item.reorder_point}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-    
-    <div style={{
-      marginTop: '20px',
-      padding: '16px',
-      backgroundColor: '#f0f9ff',
-      borderRadius: '12px',
-      border: '2px solid #0ea5e9'
-    }}>
-      <p style={{
-        color: '#0ea5e9',
-        fontWeight: '600',
-        margin: 0,
-        fontSize: '14px'
-      }}>
-        📊 Recommendations based on {data.historical?.length || 0} records from uploaded file • 
-        Date range: <strong>{filterFromDate} to {filterToDate}</strong> • 
-        High Risk: {data.inventory.filter(i => {
-          if (i.risk_level) return i.risk_level === 'HIGH';
-          if (i.days_of_stock !== undefined) return i.days_of_stock <= 3;
-          return false;
-        }).length} | 
-        Medium Risk: {data.inventory.filter(i => {
-          if (i.risk_level) return i.risk_level === 'MEDIUM';
-          if (i.days_of_stock !== undefined) return i.days_of_stock > 3 && i.days_of_stock <= 10;
-          return false;
-        }).length} | 
-        Low Risk: {data.inventory.filter(i => {
-          if (i.risk_level) return i.risk_level === 'LOW';
-          if (i.days_of_stock !== undefined) return i.days_of_stock > 15;
-          return false;
-        }).length}
-      </p>
-    </div>
-  </div>
-)}
-
-
-                                                                      
-                                                                      {/* ✅ FIXED: Normal UI for Priority Actions with REAL item names */}
-                                                                      {data.priorityActions && data.priorityActions.length > 0 && (
-                                                                        <div style={{
-                                                                          backgroundColor: 'white',
-                                                                          padding: '32px',
-                                                                          borderRadius: '16px',
-                                                                          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-                                                                          marginBottom: '32px'
-                                                                        }}>
-                                                                          <div style={{
-                                                                            display: 'flex',
-                                                                            justifyContent: 'space-between',
-                                                                            alignItems: 'center',
-                                                                            marginBottom: '24px'
-                                                                          }}>
-                                                                            <div>
-                                                                              <h3 style={{
-                                                                                fontSize: '20px',
-                                                                                fontWeight: '700',
-                                                                                margin: '0',
-                                                                                color: '#1f2937'
-                                                                              }}>
-                                                                                📈 Top Revenue Growth Recommendations
-                                                                              </h3>
-                                                                              <p style={{
-                                                                                color: '#6b7280',
-                                                                                fontSize: '14px',
-                                                                                margin: '4px 0 0 0'
-                                                                              }}>
-                                                                                Business decisions with ROI calculations from uploaded file data • Date range: {filterFromDate} to {filterToDate}
-                                                                              </p>
-                                                                            </div>
-                                                                            
-                                                                            <button
-                                                                              onClick={(handleExportPriorityActions)}
-                                                                              style={{
-                                                                                backgroundColor: '#dc2626',
-                                                                                color: 'white',
-                                                                                padding: '10px 20px',
-                                                                                border: 'none',
-                                                                                borderRadius: '8px',
-                                                                                fontWeight: '600',
-                                                                                cursor: 'pointer',
-                                                                                fontSize: '14px'
-                                                                              }}
-                                                                            >
-                                                                              📊 Export Actions
-                                                                            </button>
-                                                                          </div>
-                                                                          
-                                                                          {/* ✅ FIXED: Simple list layout showing REAL item names */}
-                                                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                                                            {data.priorityActions.map((action, index) => {
-                                                                              const hasCurrentStock =
-                                                                                action.has_current_stock === true &&
-                                                                                action.current_stock !== null &&
-                                                                                action.current_stock !== undefined;
-
-                                                                              return (
-                                                                              <div key={index} style={{
-                                                                                padding: '20px',
-                                                                                border: action.priority === 'HIGH' ? '2px solid #fecaca' : '2px solid #fed7aa',
-                                                                                borderRadius: '12px',
-                                                                                backgroundColor: action.priority === 'HIGH' ? '#fef2f2' : '#fff7ed'
-                                                                              }}>
-                                                                                <div style={{
-                                                                                  display: 'flex',
-                                                                                  justifyContent: 'space-between',
-                                                                                  alignItems: 'flex-start'
-                                                                                }}>
-                                                                                  <div style={{ flex: 1 }}>
-                                                                                    <div style={{
-                                                                                      fontSize: '16px',
-                                                                                      fontWeight: '700',
-                                                                                      color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
-                                                                                      marginBottom: '8px'
-                                                                                    }}>
-                                                                                       {action.action}
-                                                                                    </div>
-                                                                                    <div style={{
-                                                                                      fontSize: '14px',
-                                                                                      color: '#1f2937',
-                                                                                      fontWeight: '600',
-                                                                                      marginBottom: '8px'
-                                                                                    }}>
-                                                                                      {/* ✅ SHOW REAL ITEM NAME from uploaded file */}
-                                                                                      📦 {action.itemname || action.sku}
-                                                                                      <span style={{ color: '#6b7280', fontWeight: '400', fontSize: '12px' }}>
-                                                                                        {action.sku && action.itemname && ` (${action.sku})`}
-                                                                                      </span>
-                                                                                    </div>
-                                                                                    <div style={{
-                                                                                      fontSize: '14px',
-                                                                                      color: '#374151',
-                                                                                      marginBottom: '12px',
-                                                                                    }}>
-                                                                                      
-                                                                                    </div>
-                                                                                    <div style={{
-                                                                                      fontSize: '14px',
-                                                                                      color: '#6b7280',
-                                                                                      marginTop: '-5px',
-                                                                                      marginBottom: '6px',
-                                                                                      fontWeight: '500'
-                                                                                    }}>
-                                                                                      <div>
-  📦 Recommended Stock for next 7 days: <strong>{
-    action.recommended_stock_7_days != null
-      ? Number(action.recommended_stock_7_days).toLocaleString()
-      : (
-          action.recommendedaction?.match(/next 7 days:\s*([0-9.]+)/i)?.[1]
-            ? Number(action.recommendedaction.match(/next 7 days:\s*([0-9.]+)/i)[1]).toLocaleString()
-            : 'N/A'
-        )
-  }</strong> units
-</div>
-                                                                                      🚨 Expected demand for next 15 days: <strong>{action.recommended_stock?.toLocaleString() || 'N/A'}</strong> units, <div
-                                                                                      style={{
-                                                                                        marginTop: '2px',
-                                                                                        fontWeight: '',
-                                                                                      }}
-                                                                                      > </div>
-                                                                                    </div>
-                                                                                    {hasCurrentStock && (
-  <div>
-    📦 Current stock available: <strong>{Number(action.current_stock).toLocaleString()}</strong> units
-  </div>
-)}
-                                                                                    <div style={{
-                                                                                      fontSize: '12px',
-                                                                                      color: '#6b7280'
-                                                                                    }}>
-                                                                                        
-                                                                                      <div style={{
-                                                                                        fontSize: "14px",
-  marginTop: '10px',
-  padding: '10px 14px',
-  backgroundColor: '#ECFDF5',
-  borderRadius: '8px',
-  border: '1px solid #10B981'
+                                  
+                                                                         {/* FIXED: Historical Sales Analysis with working export button */}
+                                                                         {hasUploadedFile && historicalChartWithItems && historicalChartWithItems.length > 0 && (
+                                                                                                                   <div style={{
+                                                                                                                     backgroundColor: 'white',
+                                                                                                                     borderRadius: '12px',
+                                                                                                                     boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                                                                                                     marginBottom: '24px',
+                                                                                                                     border: '1px solid #e2e8f0'
+                                                                                                                   }}>
+                                                                                                                     <div style={{
+                                                                                                                       borderBottom: '1px solid #e5e7eb',
+                                                                                                                       padding: '20px 24px',
+                                                                                                                       display: 'flex',
+                                                                                                                       justifyContent: 'space-between',
+                                                                                                                       alignItems: 'center'
+                                                                                                                     }}>
+                                                                                                                       <div>
+                                                                                                                         <h3 style={{
+  fontSize: '20px',
+  fontWeight: '700',
+  margin: '0 0 4px 0',
+  color: '#1f2937'
 }}>
-  <strong style={{ color: '#065F46', fontWeight:'600', fontSize: '15px' }}>
-    💰 Expected Sales Value (Next 15 Days): ₹{action.investmentrequired?.toLocaleString() || '0'}
-  </strong>
+ 📊 Historical Sales Analysis
+  {data.filterMetadata?.dateRangeApplied?.from && (
+    <span style={{ fontSize: '13px', color: '#666', fontWeight: '400', marginLeft: '8px' }}>
+      ({data.filterMetadata.dateRangeApplied.from} to {data.filterMetadata.dateRangeApplied.to})
+    </span>
+  )}
+</h3>
+<div style={{ fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
+  Based on your uploaded data
+  {data.filterMetadata?.recordsRemoved > 0 && (
+    <span style={{ color: '#ef4444' }}>
+      {' '}({data.filterMetadata.recordsRemoved} removed by filter)
+    </span>
+  )}
 </div>
-<div style={{marginTop: '3px', fontSize: '13px'}}>📊 Based on your store’s average sales (<strong>{action.daily_sales?.toFixed(1) || 'N/A'}</strong> units/day)</div>
-                                                                                    </div>
-                                                                                  </div>
-                                                                                  
-                                                                                    {/* Revenue Risk & Stock Details */}
-  
 
-  
+<div style={{
+                                                                                                                           fontSize: '16px',
+                                                                                                                           color: '#6b7280',
+                                                                                                                           fontWeight: '500',
+                                                                                                                           marginTop: '5px',
+                                                                                                                         }}>
+                                                                                                                           Based on proprietary In algorithms •  Data-driven analysis using internal algorithms
+                                                                                                                         </div>
 
-  {/* Revenue Risk Calculation */}
- 
+<div  style={{fontSize: '14 px', marginTop: '-2px'}}/>
+  {data.filterMetadata?.filterMessage && (
+    <span style={{ color: '#667eea' }}>✅ {data.filterMetadata.filterMessage}</span>
+  )}
+  <div />
 
-                                                                                </div>
-                                                                                
-                                                                                <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                                                                                  <button 
+
+                                                                                                                       </div>
+                                                                                                                       <div style={{ display: 'flex', gap: '12px' }}>
+                                                                                                                         <button
+                                                                                                                         onClick={handleExportHistoricalData}
+                                                                                                                           style={{
+                                                                                                                             backgroundColor: '#3b82f6',
+                                                                                                                             color: 'white',
+                                                                                                                             border: 'none',
+                                                                                                                             padding: '8px 16px',
+                                                                                                                             borderRadius: '6px',
+                                                                                                                             fontSize: '14px',
+                                                                                                                             fontWeight: '600',
+                                                                                                                             cursor: 'pointer'
+                                                                                                                           }}
+                                                                                                                         >
+                                                                                                                           📥 Export Data
+                                                                                                                         </button>
+                                                                                                                         <button 
+                                     
                                      style={{
-                                       backgroundColor: action.priority === 'HIGH' ? '#dc2626' : '#F97316',
+                                       backgroundColor: '#8b5cf6',
                                        color: 'white',
-                                       padding: '8px 16px',
                                        border: 'none',
-                                       borderRadius: '6px',
-                                       fontWeight: '600',
-                                       cursor: 'pointer',
-                                       fontSize: '12px'
-                                     }}
-                                   >
-                                     🛒 View Restock Plan
-                                   </button>
-                                   
-                                                                                  
-                                                                                  <button 
-                                     style={{
-                                       backgroundColor: 'transparent',
-                                       color: action.priority === 'HIGH' ? '#dc2626' : '#ea580c',
                                        padding: '8px 16px',
-                                       border: `2px solid ${action.priority === 'HIGH' ? '#dc2626' : '#ea580c'}`,
                                        borderRadius: '6px',
+                                       fontSize: '14px',
                                        fontWeight: '600',
-                                       cursor: 'pointer',
-                                       fontSize: '12px'
+                                       cursor: 'pointer'
                                      }}
                                    >
-                                     📊 See Details
+                                     View Insights
                                    </button>
                                    
-                                                                                </div>
-                                                                              </div>
-                                                                            )})}
-                                                                          </div>
-                                                                          
-                                                                          <div style={{
-                                                                            marginTop: '20px',
-                                                                            padding: '16px',
-                                                                            backgroundColor: '#fef2f2',
-                                                                            borderRadius: '12px',
-                                                                            border: '2px solid #dc2626'
-                                                                          }}>
-                                                                            <p style={{
-                                                                              color: '#dc2626',
-                                                                              fontWeight: '600',
-                                                                              margin: 0,
-                                                                              fontSize: '14px'
-                                                                            }}>
-                                                                              🚨 All priority actions calculated from uploaded file data • 
-                                                                              Date range: {filterFromDate} to {filterToDate} • 
-                                                                              High: {data.priorityActions.filter(a => a.priority === 'HIGH').length} | 
-                                                                              Medium: {data.priorityActions.filter(a => a.priority === 'MEDIUM').length} | 
-                                                                              Low: {data.priorityActions.filter(a => a.priority === 'LOW').length} |
-                                                                              Total Revenue Risk: ₹{data.priorityActions.reduce((sum, a) => sum + (a.estimatedrevenueloss || 0), 0).toLocaleString()}
-                                                                            </p>
-                                                                          </div>
-                                                                        </div>
-                                                                      )}
-
-
-
-                                           
+                                                                                                                       </div>
+                                                                                                                     </div>
+                                                                                                                     <div style={{ padding: '24px' }}>
+                                                                                                                       <ResponsiveContainer width="100%" height={300} key={`historical-with-items-${chartRefreshKey}`}>
+                                                                                                                         <LineChart data={historicalChartWithItems}>
+                                                                                                                           <CartesianGrid strokeDasharray="3 3" />
+                                                                                                                           <XAxis 
+                                                                                                                             dataKey="displayDate" 
+                                                                                                                             angle={-45}
+                                                                                                                             textAnchor="end"
+                                                                                                                             height={60}
+                                                                                                                             interval={Math.max(0, Math.floor(historicalChartWithItems.length / 12))}
+                                                                                                                             tick={{ fontSize: 12 }}
+                                                                                                                           />
+                                                                                                                           <YAxis />
+                                                                                                                           <Tooltip content={<CustomHistoricalTooltip />} />
+                                                                                                                           <Line 
+                                                                                                                             type="monotone" 
+                                                                                                                             dataKey="totalSales" 
+                                                                                                                             stroke="#3b82f6" 
+                                                                                                                             strokeWidth={2}
+                                                                                                                             dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
+                                                                                                                             name="Total Sales with Items"
+                                                                                                                           />
+                                                                                                                         </LineChart>
+                                                                                                                       </ResponsiveContainer>
+                                                                                                                       
+                                                                                                                       <div style={{
+                                                                                                                         backgroundColor: '#dbeafe',
+                                                                                                                         border: '1px solid #3b82f6',
+                                                                                                                         padding: '12px',
+                                                                                                                         borderRadius: '8px',
+                                                                                                                         marginTop: '16px',
+                                                                                                                         fontSize: '14px',
+                                                                                                                         color: '#1d4ed8',
+                                                                                                                         textAlign: 'center'
+                                                                                                                       }}>
+                                                                                                                         📊 Showing {historicalChartWithItems.length} historical data points for range {filterFromDate} to {filterToDate} | Hover over points to see item details | Peer benchmark: You're performing 23% above average
+                                                                                                                       </div>
+                                                                                                                     </div>
+                                                                                                                   </div>
+                                                                            )}
+                    
         {/* Export & Conversion Section */}
         {hasUploadedFile && (
           <div style={{
@@ -4547,14 +4704,14 @@ It enables smarter, data-driven inventory decisions from day one."
                 margin: '0 0 4px 0',
                 color: '#1f2937'
               }}>
-                📋 Professional Report Options (Pro)
+                📋 Downloadable Store Action Reports — Pro
               </h3>
               <div style={{
                 fontSize: '14px',
                 color: '#6b7280',
                 fontWeight: '500'
               }}>
-                Payment motivation through premium reports
+                Export purchase-ready reports for owner review, staff execution, and supplier ordering.
               </div>
             </div>
 
