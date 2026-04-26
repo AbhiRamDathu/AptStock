@@ -14,6 +14,7 @@ import asyncio
 from prophet import Prophet
 from app.services.database_service import db
 from app.services.sample_data_service import SampleDataService
+from difflib import get_close_matches, SequenceMatcher
 from app.middlewares.auth_middlewares import verify_token
 from app.middlewares.auth_middlewares import check_trial_status
 from app.middlewares.auth_middlewares import check_trial_status_async
@@ -66,13 +67,15 @@ def normalize_sku(sku):
     return str(sku).strip().upper()
 
 def _read_uploaded_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
-    """
-    Parse CSV/Excel in a worker thread.
-    """
+    filename = filename.lower()
+
     if filename.endswith(".csv"):
         return pd.read_csv(BytesIO(file_bytes))
-    return pd.read_excel(BytesIO(file_bytes))
 
+    if filename.endswith((".xlsx", ".xls")):
+        return pd.read_excel(BytesIO(file_bytes))
+
+    raise ValueError("Unsupported file type. Upload CSV, XLSX, or XLS.")
 
 def _build_grouped_product_map(df: pd.DataFrame, sku_col: str) -> dict:
     """
@@ -107,261 +110,400 @@ def _parse_flexible_dates(series: pd.Series) -> pd.Series:
 # ✅ CSV COLUMN NORMALIZATION - Handles Different CSV Formats
 # ============================================================================
 
-def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize CSV/Excel column names across many POS/export formats.
-
-    Standard target columns:
-    - date
-    - sku
-    - itemname
-    - quantity
-    - unit_price
-    - unit_cost
-    - line_revenue
-    - store
-    """
-
-    # Step 1: normalize raw headers
-    df.columns = (
-        df.columns.astype(str)
-        .str.strip()
-        .str.lower()
-        .str.replace(r"[ /\-]+", "_", regex=True)
-        .str.replace(r"[^a-z0-9_]", "", regex=True)
-        .str.replace(r"_+", "_", regex=True)
-        .str.strip("_")
+def _clean_col_name(col: str) -> str:
+    return (
+        str(col)
+        .strip()
+        .lower()
+        .replace("\n", " ")
+        .replace("\r", " ")
     )
 
-    # Step 2: broad alias mapping
-    column_mapping = {
-        # =========================
-        # PRODUCT / ITEM
-        # =========================
-        "product": "itemname",
-        "product_name": "itemname",
-        "productname": "itemname",
-        "item": "itemname",
-        "item_name": "itemname",
-        "itemname": "itemname",
-        "product_title": "itemname",
-        "product_description": "itemname",
-        "item_description": "itemname",
-        "sku_name": "itemname",
-        "description": "itemname",
+def _normalize_col_key(col: str) -> str:
+    return (
+        _clean_col_name(col)
+        .replace("%", " percent ")
+        .replace("&", " and ")
+        .replace("@", " at ")
+    )
 
-        # =========================
-        # SKU / CODE
-        # =========================
-        "sku": "sku",
-        "product_id": "sku",
-        "productid": "sku",
-        "item_code": "sku",
-        "itemcode": "sku",
-        "product_code": "sku",
-        "productcode": "sku",
-        "sku_code": "sku",
-        "barcode": "sku",
-        "bar_code": "sku",
-        "plu": "sku",
-        "hsn_code": "sku",
+def _standardize_col_key(col: str) -> str:
+    return (
+        _normalize_col_key(col)
+        .strip()
+        .replace("/", "_")
+        .replace("-", "_")
+        .replace(".", "_")
+        .replace(" ", "_")
+    )
 
-        # =========================
-        # QUANTITY / UNITS
-        # =========================
-        "qty": "quantity",
-        "quantity": "quantity",
-        "units": "quantity",
-        "units_sold": "quantity",
-        "unit_sold": "quantity",
-        "sold_units": "quantity",
-        "sale_qty": "quantity",
-        "sales_qty": "quantity",
-        "item_qty": "quantity",
-        "ordered_qty": "quantity",
-        "pieces": "quantity",
-        "pcs": "quantity",
-        "count": "quantity",
-        "quantity_sold": "quantity",
+def _similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
 
-        # =========================
-        # DATE
-        # =========================
-        "date": "date",
-        "transaction_date": "date",
-        "sale_date": "date",
-        "sales_date": "date",
-        "order_date": "date",
-        "bill_date": "date",
-        "invoice_date": "date",
-        "purchase_date": "date",
-        "txn_date": "date",
-        "transaction_dt": "date",
+STANDARD_COLUMNS = [
+    "date", "sku", "itemname", "quantity",
+    "unit_price", "unit_cost", "line_revenue",
+    "current_stock", "store", "invoice_id"
+]
 
-        # =========================
-        # STORE / LOCATION
-        # =========================
-        "store": "store",
-        "store_name": "store",
-        "store_id": "store",
-        "location": "store",
-        "branch": "store",
-        "branch_name": "store",
-        "outlet": "store",
-        "outlet_name": "store",
-        "shop": "store",
-        "shop_name": "store",
+COLUMN_DETECTION_RULES = {
+    "date": {
+        "aliases": ["date", "transaction_date", "sales_date", "sale_date", "bill_date", "invoice_date", "order_date", "created_on", "voucher_date", "doc_date"],
+        "positive": ["date", "dt", "created", "invoice", "bill", "order", "voucher", "transaction"],
+        "negative": ["amount", "qty", "quantity", "price", "rate", "stock", "sku", "code"],
+    },
+    "sku": {
+        "aliases": ["plu_code", "sku", "sku_code", "skucode", "product_id", "productid", "item_code", "itemcode", "product_code", "barcode", "ean", "plu", "hsn_code", "material_code", "article_code"],
+        "positive": ["sku", "code", "barcode", "ean", "plu", "hsn", "item_code", "product_code", "material_code", "article_code"],
+        "negative": ["name", "description", "desc", "date", "qty", "quantity", "amount", "price", "rate", "stock"],
+    },
+    "itemname": {
+        "aliases": ["sku_desc", "product", "product_name", "productname", "item", "item_name", "itemname", "description", "item_description", "particulars", "material_name", "article_name", "goods", "name", "sku_desc", "sku_description"],
+        "positive": ["item", "product", "name", "description", "desc", "material", "article", "goods", "particular"],
+        "negative": ["code", "id", "sku", "date", "qty", "quantity", "amount", "price", "rate", "stock"],
+    },
+    "quantity": {
+        "aliases": ["qty", "quantity", "qnty", "qty_sold", "sold_qty", "sale_qty", "sales_qty", "quantity_sold", "units", "units_sold", "pcs", "pieces", "nos", "count", "billed_qty", "net_qty"],
+        "positive": ["qty", "quantity", "qnty", "units", "sold", "pcs", "pieces", "nos", "count"],
+        "negative": ["price", "rate", "amount", "value", "date", "stock", "cost"],
+    },
+    "unit_price": {
+        "aliases": ["unit_price", "unitprice", "price", "selling_price", "sale_price", "sales_price", "mrp", "retail_price", "selling_rate", "rate", "price_per_unit", "net_rate"],
+        "positive": ["price", "rate", "mrp", "selling", "sale", "retail"],
+        "negative": ["cost", "purchase", "amount", "total", "qty", "quantity"],
+    },
+    "unit_cost": {
+        "aliases": ["cost_price", "unit_cost", "unitcost", "cost", "cost_price", "buying_price", "buy_price", "purchase_price", "purchase_rate", "landed_cost", "vendor_price", "supplier_price", "wholesale_price"],
+        "positive": ["cost", "purchase", "buy", "buying", "vendor", "supplier", "landed", "wholesale"],
+        "negative": ["sale", "selling", "mrp", "amount", "total", "revenue"],
+    },
+    "line_revenue": {
+        "aliases": [
+    "net_sales_amount",
+    "gross_sales_value",
+    "sales_amount",
+    "line_revenue",
+    "line_total",
+    "total_amount",
+    "final_amount",
+    "net_amount",
+    "gross_amount",
+    "invoice_amount",
+    "subtotal",
+    "taxable_value",
+    "net_value",
+    "amount",
+    "total",
+    "revenue",
+    "value"
+],
+        "positive": ["amount", "total", "value", "revenue", "subtotal", "net", "gross", "taxable"],
+        "negative": ["qty", "quantity", "stock", "cost_value", "gross_cost", "net_cost", "cost", "rate", "price"],
+    },
+    "current_stock": {
+        "aliases": ["current_stock", "stock", "stock_on_hand", "stockinhand", "on_hand", "inventory", "closing_stock", "available_stock", "qty_in_hand", "opening_stock", "balance_qty"],
+        "positive": ["stock", "inventory", "hand", "closing", "available", "balance"],
+        "negative": ["sold", "sales", "amount", "price", "date", "revenue"],
+    },
+    "store": {
+        "aliases": ["store", "store_name", "store_id", "location", "branch", "branch_name", "outlet", "shop", "warehouse", "godown"],
+        "positive": ["store", "branch", "location", "outlet", "shop", "warehouse", "godown"],
+        "negative": ["item", "qty", "amount", "price"],
+    },
+    "invoice_id": {
+        "aliases": ["invoice_no", "invoice_number", "invoice", "bill_no", "bill_number", "receipt_no", "transaction_id", "txn_id", "order_id", "voucher_no", "document_no"],
+        "positive": ["invoice", "bill", "receipt", "txn", "transaction", "order", "voucher", "document"],
+        "negative": ["date", "amount", "qty", "price", "rate"],
+    },
+}
 
-        # =========================
-        # SELLING PRICE
-        # =========================
-        "unit_price": "unit_price",
-        "unitprice": "unit_price",
-        "price": "unit_price",
-        "selling_price": "unit_price",
-        "sale_price": "unit_price",
-        "mrp": "unit_price",
-        "retail_price": "unit_price",
-        "sell_price": "unit_price",
-        "sellingrate": "unit_price",
-        "selling_rate": "unit_price",
-        "rate": "unit_price",
-        "price_per_unit": "unit_price",
-        "item_price": "unit_price",
-        "product_price": "unit_price",
+def _profile_column(series: pd.Series) -> dict:
+    sample = series.dropna().head(200)
 
-        # =========================
-        # PROCUREMENT COST / COST PRICE
-        # =========================
-        "unit_cost": "unit_cost",
-        "unitcost": "unit_cost",
-        "cost": "unit_cost",
-        "cost_price": "unit_cost",
-        "costprice": "unit_cost",
-        "buying_price": "unit_cost",
-        "buy_price": "unit_cost",
-        "purchase_price": "unit_cost",
-        "procurement_cost": "unit_cost",
-        "landed_cost": "unit_cost",
-        "item_cost": "unit_cost",
-        "product_cost": "unit_cost",
-        "vendor_price": "unit_cost",
-        "supplier_price": "unit_cost",
-        "wholesale_price": "unit_cost",
+    if sample.empty:
+        return {
+            "valid_ratio": 0,
+            "numeric_ratio": 0,
+            "date_ratio": 0,
+            "text_avg_len": 0,
+            "unique_ratio": 0,
+            "positive_numeric_ratio": 0,
+        }
 
-        # =========================
-        # REVENUE / LINE TOTAL
-        # =========================
-        "amount": "line_revenue",
-        "total": "line_revenue",
-        "total_amount": "line_revenue",
-        "line_total": "line_revenue",
-        "sales_amount": "line_revenue",
-        "sale_amount": "line_revenue",
-        "revenue": "line_revenue",
-        "final_amount": "line_revenue",
-        "net_amount": "line_revenue",
-        "gross_amount": "line_revenue",
-        "bill_amount": "line_revenue",
-        "invoice_amount": "line_revenue",
-        "line_revenue": "line_revenue",
-        "line_amount": "line_revenue",
-        "subtotal": "line_revenue",
-        "value": "line_revenue",
+    as_text = sample.astype(str).str.strip()
+    numeric = pd.to_numeric(
+        as_text.str.replace(",", "", regex=False).str.replace("₹", "", regex=False),
+        errors="coerce"
+    )
 
-        # =========================
-        # CURRENT STOCK / INVENTORY
-        # =========================
-        "current_stock": "current_stock",
-        "stock": "current_stock",
-        "stock_on_hand": "current_stock",
-        "stockinhand": "current_stock",
-        "on_hand": "current_stock",
-        "inventory": "current_stock",
-        "closing_stock": "current_stock",
-        "available_stock": "current_stock",
-        "qty_in_hand": "current_stock",
-        "opening_stock": "current_stock",
+    parsed_dates = _parse_flexible_dates(as_text)
 
-        # =========================
-        # INVOICE / TRANSACTION ID
-        # =========================
-        "invoice_no": "invoice_id",
-        "invoice_number": "invoice_id",
-        "invoice": "invoice_id",
-        "bill_no": "invoice_id",
-        "bill_number": "invoice_id",
-        "bill": "invoice_id",
-        "receipt_no": "invoice_id",
-        "receipt_number": "invoice_id",
-        "txn_id": "invoice_id",
-        "transaction_id": "invoice_id",
-        "transaction_no": "invoice_id",
-        "order_id": "invoice_id",
-        "order_no": "invoice_id",
+    return {
+        "valid_ratio": len(sample) / max(len(series), 1),
+        "numeric_ratio": float(numeric.notna().mean()),
+        "date_ratio": float(parsed_dates.notna().mean()),
+        "text_avg_len": float(as_text.str.len().mean()),
+        "unique_ratio": float(as_text.nunique() / max(len(as_text), 1)),
+        "positive_numeric_ratio": float((numeric > 0).mean()),
+        "median_numeric": float(numeric.median()) if numeric.notna().any() else None,
     }
 
-    df = df.rename(columns=lambda c: column_mapping.get(c, c))
 
-    if "current_stock" in df.columns:
-        df["current_stock"] = pd.to_numeric(df["current_stock"], errors="coerce")
+def _score_column_for_target(col: str, series: pd.Series, target: str) -> float:
+    key = _standardize_col_key(col)
+    tokens = set(key.split("_"))
+    rules = COLUMN_DETECTION_RULES[target]
+    profile = _profile_column(series)
 
-    # Step 3: create SKU if missing
-    if "sku" not in df.columns:
-        if "itemname" in df.columns:
-            df["sku"] = df["itemname"].apply(
-                lambda x: re.sub(r"[^a-zA-Z0-9]", "", str(x)).upper()[:40]
-            )
+    score = 0.0
+
+    # 1) Exact alias match
+    if key in rules["aliases"]:
+        score += 100
+
+    # 2) Token-level alias match
+    for alias in rules["aliases"]:
+        alias_tokens = set(alias.split("_"))
+        if alias_tokens and alias_tokens.issubset(tokens):
+            score += 35
+
+    # 3) Positive keyword match
+    for word in rules["positive"]:
+        if word in key:
+            score += 18
+
+    # 4) Negative keyword penalty
+    for word in rules["negative"]:
+        if word in key:
+            score -= 35
+
+    # 5) Fuzzy similarity
+    best_similarity = max((_similarity(key, alias) for alias in rules["aliases"]), default=0)
+    score += best_similarity * 25
+
+    # 6) Value-profile scoring
+    if target == "date":
+        score += profile["date_ratio"] * 80
+        score -= profile["numeric_ratio"] * 10
+
+    elif target == "quantity":
+        score += profile["numeric_ratio"] * 45
+        score += profile["positive_numeric_ratio"] * 25
+        if profile["median_numeric"] is not None and profile["median_numeric"] <= 500:
+            score += 15
+
+    elif target in ["unit_price", "unit_cost", "line_revenue", "current_stock"]:
+        score += profile["numeric_ratio"] * 40
+        score += profile["positive_numeric_ratio"] * 20
+
+    elif target == "sku":
+        score += profile["unique_ratio"] * 35
+        if profile["text_avg_len"] <= 40:
+            score += 10
+        score -= profile["date_ratio"] * 60
+
+    elif target == "itemname":
+        score += (1 - profile["numeric_ratio"]) * 35
+        score += min(profile["text_avg_len"], 50) * 0.6
+        score -= profile["date_ratio"] * 60
+
+    return score
+
+
+def _detect_schema_columns(df: pd.DataFrame) -> tuple[dict, dict]:
+    """
+    Returns:
+    - mapping: original_cleaned_col -> standard_col
+    - confidence_report: standard_col -> detection details
+    """
+
+    scores = []
+
+    for col in df.columns:
+        for target in STANDARD_COLUMNS:
+            score = _score_column_for_target(col, df[col], target)
+            scores.append({
+                "column": col,
+                "target": target,
+                "score": score,
+            })
+
+    score_df = pd.DataFrame(scores).sort_values("score", ascending=False)
+
+    mapping = {}
+    used_columns = set()
+    used_targets = set()
+    confidence_report = {}
+
+    # Greedy assignment: highest score wins, no duplicate target, no duplicate source
+    for _, row in score_df.iterrows():
+        col = row["column"]
+        target = row["target"]
+        score = float(row["score"])
+
+        if col in used_columns or target in used_targets:
+            continue
+
+        # Thresholds: required columns need stronger confidence
+        if target in ["date", "quantity"]:
+            min_score = 65
+        elif target in ["sku", "itemname"]:
+            min_score = 45
         else:
-            logger.error("❌ Cannot generate SKU: no product/item column found")
-            raise ValueError("No product/item column found in CSV")
+            min_score = 40
 
-    # Step 4: ensure itemname exists
-    if "itemname" not in df.columns:
-        df["itemname"] = df["sku"].astype(str)
+        if score >= min_score:
+            mapping[col] = target
+            used_columns.add(col)
+            used_targets.add(target)
+            confidence_report[target] = {
+                "source_column": col,
+                "score": round(score, 2),
+            }
 
-    # Step 5: ensure date exists and parse
-    if "date" not in df.columns:
-        logger.error("❌ No date column found in CSV")
-        raise ValueError("No date column found in CSV")
+    return mapping, confidence_report
 
+def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Robust backend-only schema normalization.
+
+    Converts messy user files into:
+    date, sku, itemname, quantity, unit_price, unit_cost,
+    line_revenue, current_stock, store, invoice_id.
+
+    Frontend response shape remains unchanged.
+    """
+
+    if df is None or df.empty:
+        raise ValueError("Uploaded file is empty")
+
+    df = df.copy()
+
+    original_to_clean = {
+        col: _standardize_col_key(col)
+        for col in df.columns
+    }
+
+    df = df.rename(columns=original_to_clean)
+
+    # Remove empty unnamed Excel columns early
+    df = df.loc[:, ~df.columns.astype(str).str.match(r"^unnamed")]
+    df = df.dropna(axis=1, how="all")
+
+    # Remove duplicate cleaned columns
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    if df.empty or len(df.columns) == 0:
+        raise ValueError("Uploaded file has no usable columns")
+
+    schema_map, confidence_report = _detect_schema_columns(df)
+
+    if not schema_map:
+        raise ValueError(
+            f"Could not detect usable columns. Available columns: {list(df.columns)}"
+        )
+
+    df = df.rename(columns=schema_map)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    # Required detection
+    required = ["date", "quantity"]
+    missing_required = [c for c in required if c not in df.columns]
+
+    if missing_required:
+        raise ValueError(
+            f"Missing required columns after detection: {missing_required}. "
+            f"Detected: {confidence_report}. "
+            f"Available columns: {list(df.columns)}"
+        )
+
+    # Date parsing
     df["date"] = _parse_flexible_dates(df["date"])
-    invalid_dates = df["date"].isna().sum()
+    invalid_dates = int(df["date"].isna().sum())
+
     if invalid_dates > 0:
         logger.warning(f"⚠️ {invalid_dates} rows with invalid dates dropped")
         df = df.dropna(subset=["date"])
 
-    # Step 6: validate required columns
-    required_cols = ["date", "sku", "itemname", "quantity"]
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        logger.error(f"❌ Missing required columns: {missing_cols}")
-        logger.error(f"Available columns: {list(df.columns)}")
-        raise ValueError(
-            f"CSV file is missing required columns: {missing_cols}. "
-            f"Available columns: {list(df.columns)}"
-        )
+    if df.empty:
+        raise ValueError("No valid rows after date parsing")
 
-    df["sku"] = df["sku"].apply(normalize_sku)
-
-    # Step 7: numeric cleanup
+    # Quantity cleanup
+    df["quantity"] = (
+        df["quantity"]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("₹", "", regex=False)
+        .str.strip()
+    )
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-    df["quantity"] = df["quantity"].astype(float)
     df = df.dropna(subset=["quantity"])
     df = df[df["quantity"] > 0]
 
-    if "unit_price" in df.columns:
-        df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce")
+    if df.empty:
+        raise ValueError("No valid sales rows found after quantity cleaning")
 
-    if "unit_cost" in df.columns:
-        df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
+    # Product name fallback
+    if "itemname" not in df.columns:
+        if "sku" in df.columns:
+            df["itemname"] = df["sku"].astype(str)
+        else:
+            df["itemname"] = "Unknown Item"
 
-    if "line_revenue" in df.columns:
-        df["line_revenue"] = pd.to_numeric(df["line_revenue"], errors="coerce")
+    df["itemname"] = df["itemname"].astype(str).str.strip()
+    df["itemname"] = df["itemname"].replace(
+        {"": "Unknown Item", "nan": "Unknown Item", "None": "Unknown Item"}
+    )
 
-    # Step 8: auto-create revenue only if missing and unit_price exists
+    # SKU fallback
+    if "sku" not in df.columns:
+        df["sku"] = df["itemname"].apply(
+            lambda x: re.sub(r"[^a-zA-Z0-9]", "", str(x)).upper()[:40]
+        )
+
+    df["sku"] = df["sku"].apply(normalize_sku)
+    df["sku"] = df["sku"].replace({"": np.nan, "NAN": np.nan, "NONE": np.nan})
+    df = df.dropna(subset=["sku"])
+
+    if df.empty:
+        raise ValueError("No valid SKU/product rows found")
+
+    # Numeric optional fields
+    for col in ["unit_price", "unit_cost", "line_revenue", "current_stock"]:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace("₹", "", regex=False)
+                .str.strip()
+            )
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Revenue fallback
     if "line_revenue" not in df.columns and "unit_price" in df.columns:
         df["line_revenue"] = df["quantity"] * df["unit_price"].fillna(0)
+
+    # Store fallback
+    if "store" not in df.columns:
+        df["store"] = "Store A"
+
+    # Invoice cleanup
+    if "invoice_id" in df.columns:
+        df["invoice_id"] = (
+            df["invoice_id"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+    # Attach debug info without changing dataframe output structure
+    df.attrs["column_detection_report"] = confidence_report
+    df.attrs["column_schema_map"] = schema_map
+
+    logger.info(f"✅ Column detection map: {schema_map}")
+    logger.info(f"✅ Column detection confidence: {confidence_report}")
+    logger.info(f"✅ Final normalized columns: {list(df.columns)}")
 
     return df
 
@@ -411,76 +553,59 @@ async def preview_csv(
             )
         
         # ============ COLUMN DETECTION ============
-        # ============ COLUMN DETECTION ============
         raw_columns = df.columns.tolist()
 
         preview_normalized = normalize_csv_columns(df.copy())
-        final_columns = preview_normalized.columns.tolist()
 
-# Reuse the same mapping logic by calling normalize_csv_columns on a safe copy
+        detection_report = preview_normalized.attrs.get("column_detection_report", {})
+        schema_map = preview_normalized.attrs.get("column_schema_map", {})
 
-        detected_columns = {}
-        for original, cleaned in zip(raw_columns, final_columns):
-            if cleaned != original:
-                detected_columns[original] = cleaned
-            # ============ DATE RANGE ============
-        date_col = None
-        for col in ['date', 'transaction_date', 'sales_date', 'order_date', 'bill_date']:
-            if col in df.columns:
-                date_col = col
-                break
-        
-        if date_col:
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            min_date = df[date_col].min()
-            max_date = df[date_col].max()
-            date_range = {
-                'start': min_date.strftime('%Y-%m-%d') if pd.notna(min_date) else 'N/A',
-                'end': max_date.strftime('%Y-%m-%d') if pd.notna(max_date) else 'N/A'
+        detected_columns = {
+            "final_columns": preview_normalized.columns.tolist(),
+            "schema_map": schema_map,
+            "confidence": detection_report,
+            "required_detected": {
+                "date": "date" in preview_normalized.columns,
+                "sku": "sku" in preview_normalized.columns,
+                "itemname": "itemname" in preview_normalized.columns,
+                "quantity": "quantity" in preview_normalized.columns,
+                "unit_price": "unit_price" in preview_normalized.columns,
+                "line_revenue": "line_revenue" in preview_normalized.columns,
+                "current_stock": "current_stock" in preview_normalized.columns,
             }
-        else:
-            date_range = {'start': 'N/A', 'end': 'N/A'}
-        
-        # ============ TOP PRODUCTS ============
+        }
+
+# Use normalized dataframe for preview calculations
+        df = preview_normalized
+
+# ============ DATE RANGE ============
+        min_date = df["date"].min()
+        max_date = df["date"].max()
+
+        date_range = {
+            "start": min_date.strftime("%Y-%m-%d") if pd.notna(min_date) else "N/A",
+            "end": max_date.strftime("%Y-%m-%d") if pd.notna(max_date) else "N/A",
+        }
+
+# ============ TOP PRODUCTS ============
         top_products = []
-        qty_col = None
-        item_col = None
-        sku_col = None
-        
-        for col in ['quantity', 'units_sold', 'units', 'qty']:
-            if col in df.columns:
-                qty_col = col
-                break
-        
-        for col in ['itemname', 'item_name', 'product_name', 'product']:
-            if col in df.columns:
-                item_col = col
-                break
-        
-        for col in ['sku', 'product_id', 'itemcode']:
-            if col in df.columns:
-                sku_col = col
-                break
-        
-        if qty_col and item_col and sku_col:
-            grouped = df.groupby([item_col, sku_col])[qty_col].sum().reset_index()
 
-        elif qty_col and item_col:
-            grouped = df.groupby(item_col)[qty_col].sum().reset_index()
-            grouped["sku"] = "N/A"
+        grouped = (
+            df.groupby(["itemname", "sku"])["quantity"]
+            .sum()
+            .reset_index()
+            .sort_values("quantity", ascending=False)
+            .head(5)
+        )
 
-        else:
-            grouped = pd.DataFrame()
-            top_items = grouped.nlargest(5, qty_col)
-
-            top_products = [
-                {
-                    'name': str(row[item_col]),
-                    'sales': int(row[qty_col]),
-                    'sku': str(row[sku_col]) if sku_col else 'N/A'
-                }
-                for _, row in top_items.iterrows()
-            ]
+        top_products = [
+            {
+                "name": str(row["itemname"]),
+                "sales": float(row["quantity"]),
+                "sku": str(row["sku"]),
+            }
+            for _, row in grouped.iterrows()
+        ]
         
         # ============ SAMPLE DATA ============
         sample_rows = df.head(5).to_dict('records')
