@@ -6187,7 +6187,7 @@ const TrialPaywallModal = () => {
     },
     {
       name: 'PRO',
-      monthlyPrice: '₹7,500',
+      monthlyPrice: '₹6,999',
       annualPrice: '₹75,000',
       savingsPercent: '17%',
       features: [
