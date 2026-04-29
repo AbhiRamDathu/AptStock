@@ -3885,7 +3885,7 @@ const daysToStockout = getDaysToStockout(action);
     ✅ Stock-aware mode: Current stock available is <strong>{Number(currentStock).toLocaleString()}</strong> units.
   </div>
 ) : (
-  <div style={{ marginTop: '8px', color: '#92400e', fontWeight: '600' }}>
+  <div style={{ marginTop: '8px', color: '#92400e', fontWeight: '600', fontSize: '14px' }}>
     ℹ️ Sales-only mode: This recommendation is based on sales demand. Add current stock for exact shortage and reorder urgency.
   </div>
 )}
