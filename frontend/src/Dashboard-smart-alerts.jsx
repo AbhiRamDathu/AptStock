@@ -2444,25 +2444,25 @@ const metricWarning = data?.business_metrics?.metric_warning;
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
               <button
-  onClick={() => document.getElementById('csv-upload-main')?.click()}
-  style={{
-    backgroundColor: '#22c55e',
-    color: 'white',
-    border: 'none',
-    borderRadius: '12px',
-    padding: '16px 32px',
-    fontSize: '17px',
-    fontWeight: '700',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    boxShadow: '0 6px 16px rgba(34, 197, 94, 0.35)',
-    transition: 'all 0.2s ease'
-  }}
->
-  💰 Find My Stock Leaks
-</button>
+              
+                style={{
+                  backgroundColor: '#22c55e',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: '16px 32px',
+                  fontSize: '17px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  boxShadow: '0 6px 16px rgba(34, 197, 94, 0.35)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                💰 Check Your Store Profit Impact
+              </button>
 
               <button
               onClick={handleWatchVideo}
@@ -2780,7 +2780,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
               fontWeight: '700',
               color: '#1f2937'
             }}>
-              Upload POS Sales Export
+              Upload Your Sales Data
             </h3>
             <p style={{ 
               margin: '0 0 24px 0', 
@@ -2788,7 +2788,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
               color: '#6b7280',
               fontWeight: '500'
             }}>
-              Current stock is optional. AptStock works in sales-only mode first, and becomes more exact when stock data is added.
+              Enterprise-grade data processing with 256-bit SSL encryption
             </p>
 
             {/* File Format Icons */}
@@ -2846,12 +2846,12 @@ const metricWarning = data?.business_metrics?.metric_warning;
               </h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 {[
-                  'Date / Bill date',
-                    'Product name or SKU / Barcode',
-                    'Quantity sold',
-                    'Gross / Net amount optional',
-                    'Current stock optional',
-                    '30+ days recommended for better insights'
+                  'Date column (YYYY-MM-DD)',
+                  'SKU/Product ID column',
+                  'Store/Location column',
+                  'Units sold column',
+                  'Minimum 25 days of data',
+                  'No missing critical values'
                 ].map((requirement, index) => (
                   <div key={index} style={{
                     display: 'flex',
@@ -3770,14 +3770,14 @@ It enables smarter, data-driven inventory decisions from day one."
                                                                                 margin: '0',
                                                                                 color: '#1f2937'
                                                                               }}>
-                                                                                🚨 Owner Action List — Stockouts, Dead Money & Repeat Orders
+                                                                                🚨 Money-at-Risk Stock Actions
                                                                               </h3>
                                                                               <p style={{
                                                                                 color: '#6b7280',
                                                                                 fontSize: '14px',
                                                                                 margin: '4px 0 0 0'
                                                                               }}>
-                                                                                Your highest-risk products ranked by missed-sales risk, demand, and purchase decision priority. • Date range: {filterFromDate} to {filterToDate}
+                                                                                Your highest-risk products ranked by expected demand, sales value, and restock urgency. • Date range: {filterFromDate} to {filterToDate}
                                                                               </p>
                                                                             </div>
                                                                             
@@ -3926,7 +3926,7 @@ const daysToStockout = getDaysToStockout(action);
   fontSize: '14px',
   fontWeight: '700'
 }}>
-  ⚠️ Sales value tied to this item’s next 15-day demand: {formatMoneyShort(salesValueAtRisk)}.
+  ⚠️ This item alone can cost you up to {formatMoneyShort(salesValueAtRisk)} in missed sales.
 </div>
 <div style={{marginTop: '3px', fontSize: '13px'}}>📊 Based on your store’s average sales (<strong>{action.daily_sales?.toFixed(1) || 'N/A'}</strong> units/day)</div>
                                                                                     </div>
@@ -4039,14 +4039,14 @@ Keep tracking daily during trial to compare recommendation vs actual sales.
           margin: '0',
           color: '#1f2937'
         }}>
-          📦 Purchase Quantity Suggestions
+          📦 Inventory Recommendations
         </h3>
         <p style={{
           color: '#6b7280',
           fontSize: '14px',
           margin: '4px 0 0 0'
         }}>
-          Suggested quantities for the next purchase cycle based on your uploaded sales movement • Date range: {filterFromDate} to {filterToDate}
+          Stock recommendations based on your uploaded sales data • Date range: {filterFromDate} to {filterToDate}
         </p>
       </div>
       
