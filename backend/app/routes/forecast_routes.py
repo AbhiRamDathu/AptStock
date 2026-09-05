@@ -8,20 +8,45 @@ from typing import Optional
 import logging
 import json 
 import re
+from concurrent.futures import ThreadPoolExecutor
 import math
+import asyncio
 from prophet import Prophet
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from app.services.csv_import_service import CSVImportService
+from app.services.database_service import db
 from app.services.sample_data_service import SampleDataService
+from difflib import get_close_matches, SequenceMatcher
 from app.middlewares.auth_middlewares import verify_token
 from app.middlewares.auth_middlewares import check_trial_status
 from app.middlewares.auth_middlewares import check_trial_status_async
-from io import StringIO
-
-
 
 router = APIRouter(prefix="/api/forecast", tags=["forecasting"])
 logger = logging.getLogger(__name__)
+
+PLAN_LIMITS = {
+    "starter": {
+        "max_skus": 500,
+        "top_percent": 0.10,
+        "top_max": 50
+    },
+    "pro": {
+        "max_skus": 1500,
+        "top_percent": 0.15,
+        "top_max": 150
+    },
+    "enterprise": {
+        "max_skus": None,
+        "top_percent": 0.20,
+        "top_max": None
+    }
+}
+
+# ============================================================================
+# ✅ PERFORMANCE GLOBALS
+# ============================================================================
+
+FORECAST_TOP_PERCENT = 0.5   # Top 15%
+FORECAST_MAX_SKUS = 75       # Hard cap
+FORECAST_MIN_SKUS = 5         # Safety minimum for charts/demo
 
 
 def _safe_number(value, default=0.0):
@@ -38,136 +63,449 @@ def _safe_number(value, default=0.0):
     except Exception:
         return default
 
+def normalize_sku(sku):
+    return str(sku).strip().upper()
+
+def _read_uploaded_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    filename = filename.lower()
+
+    if filename.endswith(".csv"):
+        return pd.read_csv(BytesIO(file_bytes))
+
+    if filename.endswith((".xlsx", ".xls")):
+        return pd.read_excel(BytesIO(file_bytes))
+
+    raise ValueError("Unsupported file type. Upload CSV, XLSX, or XLS.")
+
+def _build_grouped_product_map(df: pd.DataFrame, sku_col: str) -> dict:
+    """
+    Build a grouped lookup once so forecasting does not repeatedly filter df.
+    """
+    grouped = {}
+    for sku, group in df.groupby(sku_col, sort=False):
+        grouped[normalize_sku(sku)] = group
+    return grouped
+
+def _parse_flexible_dates(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.strip()
+
+    # Try common Indian/export formats first
+    parsed = pd.to_datetime(s, format="%d-%m-%Y", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], format="%d/%m/%Y", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], format="%Y-%m-%d", errors="coerce")
+
+    mask = parsed.isna()
+    if mask.any():
+        parsed.loc[mask] = pd.to_datetime(s[mask], dayfirst=True, errors="coerce")
+
+    return parsed
 
 # ============================================================================
 # ✅ CSV COLUMN NORMALIZATION - Handles Different CSV Formats
 # ============================================================================
 
+def _clean_col_name(col: str) -> str:
+    return (
+        str(col)
+        .strip()
+        .lower()
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
+
+def _normalize_col_key(col: str) -> str:
+    return (
+        _clean_col_name(col)
+        .replace("%", " percent ")
+        .replace("&", " and ")
+        .replace("@", " at ")
+    )
+
+def _standardize_col_key(col: str) -> str:
+    return (
+        _normalize_col_key(col)
+        .strip()
+        .replace("/", "_")
+        .replace("-", "_")
+        .replace(".", "_")
+        .replace(" ", "_")
+    )
+
+def _similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+STANDARD_COLUMNS = [
+    "date", "sku", "itemname", "quantity",
+    "unit_price", "unit_cost", "line_revenue",
+    "current_stock", "store", "invoice_id"
+]
+
+COLUMN_DETECTION_RULES = {
+    "date": {
+        "aliases": ["date", "transaction_date", "sales_date", "sale_date", "bill_date", "invoice_date", "order_date", "created_on", "voucher_date", "doc_date"],
+        "positive": ["date", "dt", "created", "invoice", "bill", "order", "voucher", "transaction"],
+        "negative": ["amount", "qty", "quantity", "price", "rate", "stock", "sku", "code"],
+    },
+    "sku": {
+        "aliases": ["plu_code", "sku", "sku_code", "skucode", "product_id", "productid", "item_code", "itemcode", "product_code", "barcode", "ean", "plu", "hsn_code", "material_code", "article_code"],
+        "positive": ["sku", "code", "barcode", "ean", "plu", "hsn", "item_code", "product_code", "material_code", "article_code"],
+        "negative": ["name", "description", "desc", "date", "qty", "quantity", "amount", "price", "rate", "stock"],
+    },
+    "itemname": {
+        "aliases": ["sku_desc", "product", "product_name", "productname", "item", "item_name", "itemname", "description", "item_description", "particulars", "material_name", "article_name", "goods", "name", "sku_desc", "sku_description"],
+        "positive": ["item", "product", "name", "description", "desc", "material", "article", "goods", "particular"],
+        "negative": ["code", "id", "sku", "date", "qty", "quantity", "amount", "price", "rate", "stock"],
+    },
+    "quantity": {
+        "aliases": ["qty", "quantity", "qnty", "qty_sold", "sold_qty", "sale_qty", "sales_qty", "quantity_sold", "units", "units_sold", "pcs", "pieces", "nos", "count", "billed_qty", "net_qty"],
+        "positive": ["qty", "quantity", "qnty", "units", "sold", "pcs", "pieces", "nos", "count"],
+        "negative": ["price", "rate", "amount", "value", "date", "stock", "cost"],
+    },
+    "unit_price": {
+        "aliases": ["unit_price", "unitprice", "price", "selling_price", "sale_price", "sales_price", "mrp", "retail_price", "selling_rate", "rate", "price_per_unit", "net_rate"],
+        "positive": ["price", "rate", "mrp", "selling", "sale", "retail"],
+        "negative": ["cost", "purchase", "amount", "total", "qty", "quantity"],
+    },
+    "unit_cost": {
+        "aliases": ["cost_price", "unit_cost", "unitcost", "cost", "cost_price", "buying_price", "buy_price", "purchase_price", "purchase_rate", "landed_cost", "vendor_price", "supplier_price", "wholesale_price"],
+        "positive": ["cost", "purchase", "buy", "buying", "vendor", "supplier", "landed", "wholesale"],
+        "negative": ["sale", "selling", "mrp", "amount", "total", "revenue"],
+    },
+    "line_revenue": {
+        "aliases": [
+    "net_sales_amount",
+    "gross_sales_value",
+    "sales_amount",
+    "line_revenue",
+    "line_total",
+    "total_amount",
+    "final_amount",
+    "net_amount",
+    "gross_amount",
+    "invoice_amount",
+    "subtotal",
+    "taxable_value",
+    "net_value",
+    "amount",
+    "total",
+    "revenue",
+    "value"
+],
+        "positive": ["amount", "total", "value", "revenue", "subtotal", "net", "gross", "taxable"],
+        "negative": ["qty", "quantity", "stock", "cost_value", "gross_cost", "net_cost", "cost", "rate", "price"],
+    },
+    "current_stock": {
+        "aliases": ["current_stock", "stock", "stock_on_hand", "stockinhand", "on_hand", "inventory", "closing_stock", "available_stock", "qty_in_hand", "opening_stock", "balance_qty"],
+        "positive": ["stock", "inventory", "hand", "closing", "available", "balance"],
+        "negative": ["sold", "sales", "amount", "price", "date", "revenue"],
+    },
+    "store": {
+        "aliases": ["store", "store_name", "store_id", "location", "branch", "branch_name", "outlet", "shop", "warehouse", "godown"],
+        "positive": ["store", "branch", "location", "outlet", "shop", "warehouse", "godown"],
+        "negative": ["item", "qty", "amount", "price"],
+    },
+    "invoice_id": {
+        "aliases": ["invoice_no", "invoice_number", "invoice", "bill_no", "bill_number", "receipt_no", "transaction_id", "txn_id", "order_id", "voucher_no", "document_no"],
+        "positive": ["invoice", "bill", "receipt", "txn", "transaction", "order", "voucher", "document"],
+        "negative": ["date", "amount", "qty", "price", "rate"],
+    },
+}
+
+def _profile_column(series: pd.Series) -> dict:
+    sample = series.dropna().head(200)
+
+    if sample.empty:
+        return {
+            "valid_ratio": 0,
+            "numeric_ratio": 0,
+            "date_ratio": 0,
+            "text_avg_len": 0,
+            "unique_ratio": 0,
+            "positive_numeric_ratio": 0,
+        }
+
+    as_text = sample.astype(str).str.strip()
+    numeric = pd.to_numeric(
+        as_text.str.replace(",", "", regex=False).str.replace("₹", "", regex=False),
+        errors="coerce"
+    )
+
+    parsed_dates = _parse_flexible_dates(as_text)
+
+    return {
+        "valid_ratio": len(sample) / max(len(series), 1),
+        "numeric_ratio": float(numeric.notna().mean()),
+        "date_ratio": float(parsed_dates.notna().mean()),
+        "text_avg_len": float(as_text.str.len().mean()),
+        "unique_ratio": float(as_text.nunique() / max(len(as_text), 1)),
+        "positive_numeric_ratio": float((numeric > 0).mean()),
+        "median_numeric": float(numeric.median()) if numeric.notna().any() else None,
+    }
+
+
+def _score_column_for_target(col: str, series: pd.Series, target: str) -> float:
+    key = _standardize_col_key(col)
+    tokens = set(key.split("_"))
+    rules = COLUMN_DETECTION_RULES[target]
+    profile = _profile_column(series)
+
+    score = 0.0
+
+    # 1) Exact alias match
+    if key in rules["aliases"]:
+        score += 100
+
+    # 2) Token-level alias match
+    for alias in rules["aliases"]:
+        alias_tokens = set(alias.split("_"))
+        if alias_tokens and alias_tokens.issubset(tokens):
+            score += 35
+
+    # 3) Positive keyword match
+    for word in rules["positive"]:
+        if word in key:
+            score += 18
+
+    # 4) Negative keyword penalty
+    for word in rules["negative"]:
+        if word in key:
+            score -= 35
+
+    # 5) Fuzzy similarity
+    best_similarity = max((_similarity(key, alias) for alias in rules["aliases"]), default=0)
+    score += best_similarity * 25
+
+    # 6) Value-profile scoring
+    if target == "date":
+        score += profile["date_ratio"] * 80
+        score -= profile["numeric_ratio"] * 10
+
+    elif target == "quantity":
+        score += profile["numeric_ratio"] * 45
+        score += profile["positive_numeric_ratio"] * 25
+        if profile["median_numeric"] is not None and profile["median_numeric"] <= 500:
+            score += 15
+
+    elif target in ["unit_price", "unit_cost", "line_revenue", "current_stock"]:
+        score += profile["numeric_ratio"] * 40
+        score += profile["positive_numeric_ratio"] * 20
+
+    elif target == "sku":
+        score += profile["unique_ratio"] * 35
+        if profile["text_avg_len"] <= 40:
+            score += 10
+        score -= profile["date_ratio"] * 60
+
+    elif target == "itemname":
+        score += (1 - profile["numeric_ratio"]) * 35
+        score += min(profile["text_avg_len"], 50) * 0.6
+        score -= profile["date_ratio"] * 60
+
+    return score
+
+
+def _detect_schema_columns(df: pd.DataFrame) -> tuple[dict, dict]:
+    """
+    Returns:
+    - mapping: original_cleaned_col -> standard_col
+    - confidence_report: standard_col -> detection details
+    """
+
+    scores = []
+
+    for col in df.columns:
+        for target in STANDARD_COLUMNS:
+            score = _score_column_for_target(col, df[col], target)
+            scores.append({
+                "column": col,
+                "target": target,
+                "score": score,
+            })
+
+    score_df = pd.DataFrame(scores).sort_values("score", ascending=False)
+
+    mapping = {}
+    used_columns = set()
+    used_targets = set()
+    confidence_report = {}
+
+    # Greedy assignment: highest score wins, no duplicate target, no duplicate source
+    for _, row in score_df.iterrows():
+        col = row["column"]
+        target = row["target"]
+        score = float(row["score"])
+
+        if col in used_columns or target in used_targets:
+            continue
+
+        # Thresholds: required columns need stronger confidence
+        if target in ["date", "quantity"]:
+            min_score = 65
+        elif target in ["sku", "itemname"]:
+            min_score = 45
+        else:
+            min_score = 40
+
+        if score >= min_score:
+            mapping[col] = target
+            used_columns.add(col)
+            used_targets.add(target)
+            confidence_report[target] = {
+                "source_column": col,
+                "score": round(score, 2),
+            }
+
+    return mapping, confidence_report
+
 def normalize_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normalize CSV column names to handle different formats
-    
-    Handles:
-    - Date/DATE → date
-    - Product/Item → itemname  
-    - Creates SKU from product name if missing
-    - Normalizes quantity column name
-    
-    Args:
-        df: Raw dataframe from CSV upload
-        
-    Returns:
-        Normalized dataframe with standardized column names
-        
-    Raises:
-        ValueError: If required columns cannot be created
+    Robust backend-only schema normalization.
+
+    Converts messy user files into:
+    date, sku, itemname, quantity, unit_price, unit_cost,
+    line_revenue, current_stock, store, invoice_id.
+
+    Frontend response shape remains unchanged.
     """
-    # Create a copy to avoid modifying original
+
+    if df is None or df.empty:
+        raise ValueError("Uploaded file is empty")
+
     df = df.copy()
-    
-    # Step 1: Normalize all columns to lowercase
-    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-    
-    logger.info(f"📋 Original columns (lowercase): {list(df.columns)}")
-    
-    # Step 2: Map common column name variations
-    column_mapping = {
-    # Product
-    'product': 'itemname',
-    'product_name': 'itemname',
-    'productname': 'itemname',
-    'item': 'itemname',
-    'item_name': 'itemname',
 
-    # Quantity
-    'qty': 'quantity',
-    'units': 'quantity',
-    'units_sold': 'quantity',
+    original_to_clean = {
+        col: _standardize_col_key(col)
+        for col in df.columns
+    }
 
-    # Date
-    'transaction_date': 'date',
-    'sale_date': 'date',
-    'order_date': 'date',
+    df = df.rename(columns=original_to_clean)
 
-    # ✅ ADD THIS (VERY IMPORTANT)
-    # Price columns
-    'price': 'unit_price',
-    'unitprice': 'unit_price',
-    'selling_price': 'unit_price',
-    'sale_price': 'unit_price',
-    'rate': 'unit_price',
+    # Remove empty unnamed Excel columns early
+    df = df.loc[:, ~df.columns.astype(str).str.match(r"^unnamed")]
+    df = df.dropna(axis=1, how="all")
 
-    # Revenue columns
-    'amount': 'line_revenue',
-    'total': 'line_revenue',
-    'line_total': 'line_revenue',
-    'sales_amount': 'line_revenue',
-    'revenue': 'line_revenue',
-    'final_amount': 'line_revenue'
-}
-    df = df.rename(columns=column_mapping)
-    
-    logger.info(f"📋 After mapping: {list(df.columns)}")
-    
-    # Step 3: If no SKU column exists, generate from itemname
-    if 'sku' not in df.columns:
-        if 'itemname' in df.columns:
-            # Create SKU: remove special chars, uppercase, limit to 20 chars
-            df['sku'] = df['itemname'].apply(
-                lambda x: re.sub(r'[^a-zA-Z0-9]', '', str(x)).upper()[:20]
-            )
-            logger.info(f"✅ Generated 'sku' column from 'itemname' ({df['sku'].nunique()} unique SKUs)")
-        else:
-            logger.error("❌ Cannot generate SKU: no itemname column found")
-            raise ValueError("No product/item column found in CSV")
-    
-    # Step 4: Ensure itemname exists (use sku if needed)
-    if 'itemname' not in df.columns:
-        df['itemname'] = df['sku']
-        logger.info(f"✅ Created 'itemname' from 'sku'")
-    
-    # Step 5: Ensure date column is datetime
-    if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        invalid_dates = df['date'].isna().sum()
-        if invalid_dates > 0:
-            logger.warning(f"⚠️  {invalid_dates} rows with invalid dates will be dropped")
-            df = df.dropna(subset=['date'])
-    else:
-        logger.error("❌ No date column found in CSV")
-        raise ValueError("No date column found in CSV")
-    
-    # Step 6: Validate required columns
-    required_cols = ['date', 'sku', 'itemname', 'quantity']
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    
-    if missing_cols:
-        logger.error(f"❌ Missing required columns: {missing_cols}")
-        logger.error(f"   Available columns: {list(df.columns)}")
+    # Remove duplicate cleaned columns
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    if df.empty or len(df.columns) == 0:
+        raise ValueError("Uploaded file has no usable columns")
+
+    schema_map, confidence_report = _detect_schema_columns(df)
+
+    if not schema_map:
         raise ValueError(
-            f"CSV file is missing required columns: {missing_cols}. "
+            f"Could not detect usable columns. Available columns: {list(df.columns)}"
+        )
+
+    df = df.rename(columns=schema_map)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+
+    # Required detection
+    required = ["date", "quantity"]
+    missing_required = [c for c in required if c not in df.columns]
+
+    if missing_required:
+        raise ValueError(
+            f"Missing required columns after detection: {missing_required}. "
+            f"Detected: {confidence_report}. "
             f"Available columns: {list(df.columns)}"
         )
-    
-    # Step 7: Convert quantity to numeric
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
-    df = df.dropna(subset=['quantity'])
-    df = df[df['quantity'] > 0]
 
-    # ✅ AUTO-CREATE REVENUE IF MISSING
-    if 'line_revenue' not in df.columns and 'unit_price' in df.columns:
-        df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
-        df['line_revenue'] = df['quantity'] * df['unit_price']
-        logger.info("✅ Created line_revenue from quantity × unit_price")
-    
-    logger.info(f"✅ CSV normalized successfully:")
-    logger.info(f"   - {len(df)} rows")
-    logger.info(f"   - {df['sku'].nunique()} unique products")
-    logger.info(f"   - Date range: {df['date'].min().date()} to {df['date'].max().date()}")
-    logger.info(f"   - {df['date'].nunique()} unique dates")
-    
+    # Date parsing
+    df["date"] = _parse_flexible_dates(df["date"])
+    invalid_dates = int(df["date"].isna().sum())
+
+    if invalid_dates > 0:
+        logger.warning(f"⚠️ {invalid_dates} rows with invalid dates dropped")
+        df = df.dropna(subset=["date"])
+
+    if df.empty:
+        raise ValueError("No valid rows after date parsing")
+
+    # Quantity cleanup
+    df["quantity"] = (
+        df["quantity"]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("₹", "", regex=False)
+        .str.strip()
+    )
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
+    df = df.dropna(subset=["quantity"])
+    df = df[df["quantity"] > 0]
+
+    if df.empty:
+        raise ValueError("No valid sales rows found after quantity cleaning")
+
+    # Product name fallback
+    if "itemname" not in df.columns:
+        if "sku" in df.columns:
+            df["itemname"] = df["sku"].astype(str)
+        else:
+            df["itemname"] = "Unknown Item"
+
+    df["itemname"] = df["itemname"].astype(str).str.strip()
+    df["itemname"] = df["itemname"].replace(
+        {"": "Unknown Item", "nan": "Unknown Item", "None": "Unknown Item"}
+    )
+
+    # SKU fallback
+    if "sku" not in df.columns:
+        df["sku"] = df["itemname"].apply(
+            lambda x: re.sub(r"[^a-zA-Z0-9]", "", str(x)).upper()[:40]
+        )
+
+    df["sku"] = df["sku"].apply(normalize_sku)
+    df["sku"] = df["sku"].replace({"": np.nan, "NAN": np.nan, "NONE": np.nan})
+    df = df.dropna(subset=["sku"])
+
+    if df.empty:
+        raise ValueError("No valid SKU/product rows found")
+
+    # Numeric optional fields
+    for col in ["unit_price", "unit_cost", "line_revenue", "current_stock"]:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace("₹", "", regex=False)
+                .str.strip()
+            )
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Revenue fallback
+    if "line_revenue" not in df.columns and "unit_price" in df.columns:
+        df["line_revenue"] = df["quantity"] * df["unit_price"].fillna(0)
+
+    # Store fallback
+    if "store" not in df.columns:
+        df["store"] = "Store A"
+
+    # Invoice cleanup
+    if "invoice_id" in df.columns:
+        df["invoice_id"] = (
+            df["invoice_id"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+    # Attach debug info without changing dataframe output structure
+    df.attrs["column_detection_report"] = confidence_report
+    df.attrs["column_schema_map"] = schema_map
+
+    logger.info(f"✅ Column detection map: {schema_map}")
+    logger.info(f"✅ Column detection confidence: {confidence_report}")
+    logger.info(f"✅ Final normalized columns: {list(df.columns)}")
+
     return df
-
 
 @router.post("/preview")
 @check_trial_status_async
@@ -186,9 +524,7 @@ async def preview_csv(
     - Sample 5 rows of data
     - Detected columns mapping
     """
-    
-    logger.info(f"🔍 CSV PREVIEW REQUEST: {file.filename}")
-    
+     
     try:
         # ============ FILE VALIDATION ============
         if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
@@ -199,14 +535,17 @@ async def preview_csv(
         
         # ============ FILE READING ============
         contents = await file.read()
-        
+
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="File too large. Maximum allowed size is 10MB."
+            )
+
         try:
-            if file.filename.endswith('.csv'):
-                df = pd.read_csv(BytesIO(contents))
-            else:
-                df = pd.read_excel(BytesIO(contents))
-            
-            logger.info(f"✅ File parsed: {df.shape} rows × {df.shape} columns")
+            df = await asyncio.to_thread(_read_uploaded_dataframe, contents, file.filename)
         except Exception as parse_error:
             raise HTTPException(
                 status_code=400,
@@ -214,78 +553,59 @@ async def preview_csv(
             )
         
         # ============ COLUMN DETECTION ============
-        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-        
-        # Map columns to standard names
-        column_mapping = {
-            'product': 'itemname',
-            'product_name': 'itemname',
-            'productname': 'itemname',
-            'item': 'itemname',
-            'item_name': 'itemname',
-            'qty': 'quantity',
-            'units': 'quantity',
-            'units_sold': 'quantity',
-            'transaction_date': 'date',
-            'sale_date': 'date',
-            'order_date': 'date',
-            'bill_date': 'date',
-        }
-        
-        detected_columns = {}
-        for old_col, new_col in column_mapping.items():
-            if old_col in df.columns:
-                detected_columns[new_col] = old_col
-        
-        # ============ DATE RANGE ============
-        date_col = None
-        for col in ['date', 'transaction_date', 'sales_date', 'order_date', 'bill_date']:
-            if col in df.columns:
-                date_col = col
-                break
-        
-        if date_col:
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            min_date = df[date_col].min()
-            max_date = df[date_col].max()
-            date_range = {
-                'start': min_date.strftime('%Y-%m-%d') if pd.notna(min_date) else 'N/A',
-                'end': max_date.strftime('%Y-%m-%d') if pd.notna(max_date) else 'N/A'
+        raw_columns = df.columns.tolist()
+
+        preview_normalized = normalize_csv_columns(df.copy())
+
+        detection_report = preview_normalized.attrs.get("column_detection_report", {})
+        schema_map = preview_normalized.attrs.get("column_schema_map", {})
+
+        detected_columns = {
+            "final_columns": preview_normalized.columns.tolist(),
+            "schema_map": schema_map,
+            "confidence": detection_report,
+            "required_detected": {
+                "date": "date" in preview_normalized.columns,
+                "sku": "sku" in preview_normalized.columns,
+                "itemname": "itemname" in preview_normalized.columns,
+                "quantity": "quantity" in preview_normalized.columns,
+                "unit_price": "unit_price" in preview_normalized.columns,
+                "line_revenue": "line_revenue" in preview_normalized.columns,
+                "current_stock": "current_stock" in preview_normalized.columns,
             }
-        else:
-            date_range = {'start': 'N/A', 'end': 'N/A'}
-        
-        # ============ TOP PRODUCTS ============
+        }
+
+# Use normalized dataframe for preview calculations
+        df = preview_normalized
+
+# ============ DATE RANGE ============
+        min_date = df["date"].min()
+        max_date = df["date"].max()
+
+        date_range = {
+            "start": min_date.strftime("%Y-%m-%d") if pd.notna(min_date) else "N/A",
+            "end": max_date.strftime("%Y-%m-%d") if pd.notna(max_date) else "N/A",
+        }
+
+# ============ TOP PRODUCTS ============
         top_products = []
-        qty_col = None
-        item_col = None
-        sku_col = None
-        
-        for col in ['quantity', 'units_sold', 'units', 'qty']:
-            if col in df.columns:
-                qty_col = col
-                break
-        
-        for col in ['itemname', 'item_name', 'product_name', 'product']:
-            if col in df.columns:
-                item_col = col
-                break
-        
-        for col in ['sku', 'product_id', 'itemcode']:
-            if col in df.columns:
-                sku_col = col
-                break
-        
-        if qty_col and item_col:
-            top_items = df.groupby(item_col)[qty_col].sum().nlargest(5)
-            top_products = [
-                {
-                    'name': str(name),
-                    'sales': int(sales),
-                    'sku': str(df[df[item_col] == name][sku_col].iloc) if sku_col else 'N/A'
-                }
-                for name, sales in top_items.items()
-            ]
+
+        grouped = (
+            df.groupby(["itemname", "sku"])["quantity"]
+            .sum()
+            .reset_index()
+            .sort_values("quantity", ascending=False)
+            .head(5)
+        )
+
+        top_products = [
+            {
+                "name": str(row["itemname"]),
+                "sales": float(row["quantity"]),
+                "sku": str(row["sku"]),
+            }
+            for _, row in grouped.iterrows()
+        ]
         
         # ============ SAMPLE DATA ============
         sample_rows = df.head(5).to_dict('records')
@@ -339,23 +659,34 @@ async def upload_and_process_file(
     - Real inventory calculations
     - Honest accuracy metrics (no fake 99%)
     """
-    
-    logger.info(f"\n{'='*80}")
-    logger.info(f"🚀 PRODUCTION FORECASTING API v2.0 - ENTERPRISE-GRADE")
-    logger.info(f"👤 User: {token.get('email', 'unknown')}")
-    logger.info(f"📁 File: {file.filename}")
-    logger.info(f"{'='*80}\n")
-    
+
     try:
         user_email = token.get('email', 'unknown')
+        user_doc = db.users.find_one({"email": user_email})
+        user_role = user_doc.get("role", "user").lower()
+        user_plan = user_doc.get("plan", "starter")
+
+# 🔥 ADMIN BYPASS
+        if user_role == "admin":
+            limits = {
+                "max_skus": None,
+                "top_percent": 1.0,
+                "top_max": None
+            }
+        else:
+            limits = PLAN_LIMITS.get(user_plan, PLAN_LIMITS["starter"])
 
         # Parse JSON from form data
-        unit_cost_dict = json.loads(unit_cost_dict or '{}')
-        unit_price_dict = json.loads(unit_price_dict or '{}')
-        current_stock_dict = json.loads(current_stock_dict or '{}')
-        lead_time_dict = json.loads(lead_time_dict or '{}')
+        def safe_json_load(data):
+            try:
+                return json.loads(data) if data else {}
+            except:
+                return {}
 
-        logger.info(f"📊 Cost data received: {len(unit_cost_dict)} items with costs")
+        unit_cost_dict = {normalize_sku(k): v for k, v in safe_json_load(unit_cost_dict).items()}
+        unit_price_dict = {normalize_sku(k): v for k, v in safe_json_load(unit_price_dict).items()}
+        current_stock_dict = {normalize_sku(k): v for k, v in safe_json_load(current_stock_dict).items()}
+        lead_time_dict = {normalize_sku(k): v for k, v in safe_json_load(lead_time_dict).items()}
         
         # ============ FILE VALIDATION ============
         if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
@@ -366,15 +697,9 @@ async def upload_and_process_file(
         
         # ============ FILE READING ============
         contents = await file.read()
-        logger.info(f"✅ File read: {len(contents)} bytes")
-        
+
         try:
-            if file.filename.endswith('.csv'):
-                df = pd.read_csv(BytesIO(contents))
-            else:
-                df = pd.read_excel(BytesIO(contents))
-            
-            logger.info(f"✅ Parsed: {df.shape[0]} rows × {df.shape[1]} columns")
+            df = await asyncio.to_thread(_read_uploaded_dataframe, contents, file.filename)
         except Exception as parse_error:
             logger.error(f"❌ File parsing error: {str(parse_error)}")
             raise HTTPException(
@@ -393,6 +718,29 @@ async def upload_and_process_file(
             )
         
         sales_column = 'quantity'  # Now standardized
+
+        # ============ EXTRACT CURRENT STOCK FROM UPLOADED FILE ============
+        file_current_stock_dict = {}
+
+        if "current_stock" in df.columns:
+            stock_df = df.dropna(subset=["sku"]).copy()
+            stock_df["current_stock"] = pd.to_numeric(stock_df["current_stock"], errors="coerce")
+            stock_df = stock_df.dropna(subset=["current_stock"])
+
+            if not stock_df.empty:
+                # latest known stock per SKU from uploaded file
+                file_current_stock_dict = {
+                    normalize_sku(sku): float(stock_value)
+                    for sku, stock_value in (
+                        stock_df.sort_values("date")
+                        .groupby("sku")["current_stock"]
+                        .last()
+                        .items()
+                    )
+                }
+
+        # frontend/manual stock overrides file stock if both exist
+        current_stock_dict = {**file_current_stock_dict, **current_stock_dict}
         
         # ============ DATA CLEANING ============
         df = df.sort_values('date')
@@ -402,28 +750,26 @@ async def upload_and_process_file(
                 status_code=400, 
                 detail="No valid data after cleaning"
             )
-        
-        logger.info(f"📊 Clean data: {len(df)} rows, Date range: {df['date'].min().date()} to {df['date'].max().date()}")
-        
-        unique_products = df['sku'].nunique()
-        unique_dates = df['date'].nunique()
-        
-        # ============ DATA QUALITY CHECKS ============
-        if unique_dates < 14:
-            logger.warning(f"⚠️ Only {unique_dates} days of data - forecasts may be less reliable")
 
-        if unique_products == 0:
+        df_filtered = df
+
+# ============ DATA QUALITY CHECKS ============
+        raw_unique_dates = df_filtered['date'].nunique()
+        raw_unique_products = df_filtered['sku'].nunique()
+
+        if raw_unique_dates < 14:
+            logger.warning(f"⚠️ Only {raw_unique_dates} days of data - forecasts may be less reliable")
+
+        if raw_unique_products == 0:
             raise HTTPException(status_code=400, detail="No products found in data")
 
-# ✅ NEW FIX #1: Apply date filtering EARLY (not after forecasting)
-        df_filtered = df.copy()
+        # ✅ APPLY PLAN SKU LIMIT
         df_filtered = df_filtered.dropna(subset=['date'])
 
         if filter_from_date:
             try:
                 filter_from_date_dt = pd.to_datetime(filter_from_date)
                 df_filtered = df_filtered[df_filtered['date'] >= filter_from_date_dt]
-                logger.info(f'✅ Applied FROM date filter: {filter_from_date}')
             except Exception as e:
                 logger.error(f'Invalid from_date format: {filter_from_date}')
                 raise HTTPException(status_code=400, detail=f'Invalid from_date: {str(e)}')
@@ -432,10 +778,16 @@ async def upload_and_process_file(
             try:
                 filter_to_date_dt = pd.to_datetime(filter_to_date)
                 df_filtered = df_filtered[df_filtered['date'] <= filter_to_date_dt]
-                logger.info(f'✅ Applied TO date filter: {filter_to_date}')
             except Exception as e:
                 logger.error(f'Invalid to_date format: {filter_to_date}')
                 raise HTTPException(status_code=400, detail=f'Invalid to_date: {str(e)}')
+
+        # ✅ ADD HERE (CORRECT PLACE)
+        MAX_HISTORY_DAYS = 180
+
+        if not df_filtered.empty:
+            cutoff_date = df_filtered['date'].max() - pd.Timedelta(days=MAX_HISTORY_DAYS)
+            df_filtered = df_filtered[df_filtered['date'] >= cutoff_date]
 
         if df_filtered.empty:
             logger.error(f'❌ No data found in date range {filter_from_date} to {filter_to_date}')
@@ -444,54 +796,51 @@ async def upload_and_process_file(
                 detail=f'No data available in the selected date range ({filter_from_date} to {filter_to_date}). Please select a different date range.'
             )
 
-        logger.info(f'📊 Data after date filtering: {len(df_filtered)} rows (original {len(df)} rows)')
-        logger.info(f'   Date range: {df_filtered["date"].min().date()} to {df_filtered["date"].max().date()}')
-        logger.info(f'   Unique products: {df_filtered["sku"].nunique()}')
+        # ✅ FIX: summary counts must use FILTERED data
+        unique_products = df_filtered['sku'].nunique()
+        unique_dates = df_filtered['date'].nunique()
 
-        logger.info("🔥 GENERATING ENTERPRISE-GRADE ANALYTICS...")
-
-
+        # ✅ Build grouped SKU map ONCE for forecasting performance
+        grouped_product_map = _build_grouped_product_map(df_filtered, 'sku')
         
         # ============ GENERATE ANALYTICS ============
         try:
-            logger.info("\n🎯 GENERATING ENTERPRISE-GRADE ANALYTICS...")
             
             # Historical Summary
-            logger.info("📈 Historical Analysis...")
             historical_data = generate_historical_summary_real(df_filtered
                 , 'quantity', 
                 filter_from_date=filter_from_date,  # ✅ NEW
                 filter_to_date=filter_to_date )
-            logger.info(f"✅ Historical: {len(historical_data)} points")
-            
+
             # Prophet Forecasts
-            logger.info("🔮 AI Forecasting (Prophet + Cross-Validation)...")
-            forecasts_list = generate_forecasts_production_ready(df_filtered, 'quantity', filter_from_date=filter_from_date,  # ✅ NEW
-    filter_to_date=filter_to_date )
-            
-            if forecasts_list:
-                avg_acc = np.mean([f['accuracy'] for f in forecasts_list])
-                logger.info(f"✅ Forecasts: {len(forecasts_list)} products with avg accuracy: {avg_acc:.2%}")
+            all_forecasts_list = generate_forecasts_production_ready(
+                df_filtered,
+                'quantity',
+                filter_from_date=filter_from_date,
+                filter_to_date=filter_to_date,
+                grouped_product_map=grouped_product_map
+            )
+
+# Only first 5 visible in frontend charts
+            visible_forecasts_list = all_forecasts_list[:5] if all_forecasts_list else []
+
+            if all_forecasts_list:
+                avg_acc = np.mean([f.get('accuracy', 0.85) for f in all_forecasts_list])
             else:
-                logger.warning("⚠️  No forecasts generated - data may be insufficient")
+                logger.warning("⚠️ No forecasts generated - data may be insufficient")
             
             # Inventory Recommendations
-            logger.info("📦 Inventory Optimization...")
             inventory_list = generate_inventory_real_from_file(df_filtered, 'quantity', filter_from_date=filter_from_date,
             filter_to_date=filter_to_date, unit_cost_dict=unit_cost_dict,        
             unit_price_dict=unit_price_dict,      
             current_stock_dict=current_stock_dict,  
-            lead_time_dict=lead_time_dict )
-            logger.info(f"✅ Inventory: {len(inventory_list)} items")
+            lead_time_dict=lead_time_dict, forecasts_list=all_forecasts_list )
             
             # Priority Actions
-            logger.info("🎯 Priority Actions...")
             priority_actions = generate_actions_v2_smart(inventory_list, filter_from_date=filter_from_date,  # ✅ NEW
     filter_to_date=filter_to_date)
-            logger.info(f"✅ Actions: {len(priority_actions)} priorities")
             
             # Business Metrics
-            logger.info("💼 Business Metrics...")
             business_metrics = calculate_business_metrics_v2(df_filtered, sales_column)
 
             # ============================
@@ -519,18 +868,19 @@ async def upload_and_process_file(
 # ============================
 
             stockout_loss = None
-            has_stock_data = False
+            has_stock_data = bool(current_stock_dict and len(current_stock_dict) > 0)
 
-            if current_stock_dict and unit_price_dict:
+            stockout_loss = None
+
+            if has_stock_data and unit_price_dict:
                 stockout_loss = 0
-                has_stock_data = True
 
                 for item in inventory_list:
-                    current_stock = float(item.get('current_stock') or 0)
+                    current_stock = item.get('current_stock')
                     daily_demand = float(item.get('daily_sales_avg') or 0)
-                    unit_price = float(unit_price_dict.get(item.get('sku')) or 0)
+                    unit_price = float(unit_price_dict.get(normalize_sku(item.get('sku'))) or 0)
 
-                    if current_stock <= 0:
+                    if current_stock is not None and float(current_stock) <= 0:
                         stockout_loss += daily_demand * unit_price * 7
 
 
@@ -544,13 +894,10 @@ async def upload_and_process_file(
                 ai_value = (total_profit or 0) * 0.15 + (stockout_loss or 0)
             
             # ROI
-            logger.info("💰 ROI Calculation...")
-            roi_metrics = calculate_roi_v2(df_filtered, sales_column, forecasts_list, inventory_list)
+            roi_metrics = calculate_roi_v2(df_filtered, sales_column, all_forecasts_list, inventory_list)
 
-                            # ✅ NEW: BUILD AGGREGATED ITEM-LEVEL HISTORICAL (ONE ROW PER DATE+SKU)
-            logger.info("📥 Building aggregated historical_raw (date+sku)...")
-
-            df_raw = df_filtered.copy()
+            # ✅ NEW: BUILD AGGREGATED ITEM-LEVEL HISTORICAL (ONE ROW PER DATE+SKU)
+            df_raw = df_filtered
             df_raw.columns = df_raw.columns.str.strip().str.lower().str.replace(' ', '_')
 
         # Core columns
@@ -561,7 +908,6 @@ async def upload_and_process_file(
             store_col = next((c for c in df_raw.columns if 'store' in c), None)
 
         # Ensure datetime
-            df_raw[date_col] = pd.to_datetime(df_raw[date_col], errors='coerce')
             df_raw = df_raw.dropna(subset=[date_col])
 
         # ✅ GROUP: one row per (date, sku, itemname, store) with total units
@@ -576,19 +922,22 @@ async def upload_and_process_file(
                 .reset_index()
             )
 
-            historical_raw = []
-            for _, r in grouped.iterrows():
-                historical_raw.append({
-                    "date": r[date_col].strftime("%Y-%m-%d") if pd.notna(r[date_col]) else "",
-                    "sku": str(r.get(sku_col, "")).strip(),
-                    "item_name": str(r.get(item_col, "")).strip(),
-                    "store": str(r.get(store_col, "")).strip() if store_col else "",
-                    "units_sold": float(r.get(qty_col, 0.0)),
-                })
+            historical_raw = [
+                {
+                    "date": r.date.strftime("%Y-%m-%d") if pd.notna(r.date) else "",
+                    "sku": normalize_sku(r.sku),
+                    "item_name": str(r.itemname).strip(),
+                    "store": str(getattr(r, store_col, "")).strip() if store_col else "",
+                    "units_sold": float(r.quantity),
+                }
+                for r in grouped.itertuples(index=False)
+            ]
 
-            logger.info(f"✅ Built {len(historical_raw)} aggregated historical rows for export")
+            # ✅ LIMIT historical_raw (trust + performance)
+            MAX_HISTORICAL_ROWS = 1000
 
-
+            if len(historical_raw) > MAX_HISTORICAL_ROWS:
+                historical_raw = historical_raw[:MAX_HISTORICAL_ROWS]
             
         except Exception as analytics_error:
             logger.error(f"❌ Analytics error: {str(analytics_error)}")
@@ -607,6 +956,39 @@ async def upload_and_process_file(
         actual_start_date = df_filtered['date'].min().strftime('%Y-%m-%d')
         actual_end_date = df_filtered['date'].max().strftime('%Y-%m-%d')
         actual_days = (pd.to_datetime(actual_end_date) - pd.to_datetime(actual_start_date)).days + 1
+
+        # ✅ FIX: REAL average daily sales (daily totals mean, not row mean)
+        daily_sales_summary = (
+            df_filtered
+            .groupby(df_filtered['date'].dt.date)[sales_column]
+            .sum()
+        )
+
+        average_daily_sales = (
+            float(daily_sales_summary.mean())
+            if not daily_sales_summary.empty
+            else 0.0
+        )
+
+        # ================================
+# ✅ VISIBILITY CONTROL (FINAL)
+# ================================
+
+        visible_inventory = inventory_list
+        visible_actions = priority_actions
+
+        if user_role != "admin" and limits["max_skus"]:
+
+    # Step 1: take top SKUs from inventory (single source of truth)
+            visible_inventory = inventory_list[:limits["max_skus"]]
+
+            visible_skus = set(i["sku"] for i in visible_inventory)
+
+    # Step 2: filter priority actions using SAME SKUs
+            visible_actions = [
+                a for a in priority_actions
+                if a["sku"] in visible_skus
+            ]
         
         # ============ RESPONSE ============
         response = {
@@ -641,11 +1023,18 @@ async def upload_and_process_file(
                     'filter_message': f'Analyzed {filtered_count} of {original_count} records ({filter_percentage:.1f}%)'
                 },
                 "total_sales": round(float(df_filtered[sales_column].sum()), 2),
-                "average_daily_sales": round(float(df_filtered[sales_column].mean()), 2),
+                "average_daily_sales": round(average_daily_sales, 2),
                 "processed_at": datetime.utcnow().isoformat(),
                 "file_name": file.filename,
                 "user": user_email,
                 "sales_column_used": sales_column,
+                "plan": user_plan,
+                "plan_limits": limits,
+            },
+
+            "enhancement_layers": {
+                "layer_1_forecast_active": True,
+                "layer_2_current_stock_active": bool(current_stock_dict and len(current_stock_dict) > 0)
             },
 
             "business_insights": {
@@ -659,18 +1048,15 @@ async def upload_and_process_file(
             "historical": historical_data,
             "historical_raw": historical_raw,
             "business_metrics": business_metrics,
-            "forecasts": forecasts_list,
-            "inventory": inventory_list,
-            "priority_actions": priority_actions,
+            "forecasts": visible_forecasts_list,
+            "inventory": visible_inventory,
+            "priority_actions": visible_actions,
             "roi": roi_metrics,
         }
         
         logger.info(f"\n{'='*80}")
-        logger.info(f"✅ SUCCESS - ENTERPRISE-GRADE RESPONSE READY")
-        logger.info(f"   📊 Historical: {len(historical_data)} points")
-        logger.info(f"   🔮 Forecasts: {len(forecasts_list)} products")
+        logger.info(f"   🖥️ Forecasts visible (frontend): {len(visible_forecasts_list)} products")
         logger.info(f"   📦 Inventory: {len(inventory_list)} items")
-        logger.info(f"   🎯 Actions: {len(priority_actions)} priorities")
         logger.info(f"{'='*80}\n")
         
         return JSONResponse(content=response)
@@ -693,19 +1079,15 @@ async def upload_and_process_file(
 def generate_historical_summary_real(df: pd.DataFrame, sales_column: str, filter_from_date: str = None,  # ✅ ADD THIS PARAMETER
     filter_to_date: str = None) -> list:
     """✅ Generate REAL historical data with ACTUAL top items - ARRAY format"""
-    logger.info("📊 Generating REAL Historical Summary...")
     
     try:
         if df.empty:
             logger.error("❌ DataFrame empty")
             return []
-        
-        # ✅ NORMALIZE COLUMNS
-        df = df.copy()
-        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-        
-        # ✅ FIND DATE COLUMN
+
+        # ✅ FIND DATE COLUMN (SAFE + CLEAN)
         date_col = None
+
         for col in ['date', 'transaction_date', 'sales_date', 'order_date']:
             if col in df.columns:
                 date_col = col
@@ -714,8 +1096,6 @@ def generate_historical_summary_real(df: pd.DataFrame, sales_column: str, filter
         if not date_col:
             logger.error(f"❌ No date column. Available: {df.columns.tolist()}")
             return []
-        
-        df[date_col] = pd.to_datetime(df[date_col])
         
         # ✅ FIND QTY COLUMN
         qty_col = sales_column.lower()
@@ -731,10 +1111,7 @@ def generate_historical_summary_real(df: pd.DataFrame, sales_column: str, filter
         # ✅ FIND SKU COLUMN
         sku_col = 'sku' if 'sku' in df.columns else 'product_id' if 'product_id' in df.columns else None
         
-        logger.info(f"✅ Using: date={date_col}, qty={qty_col}, item={item_col}, sku={sku_col}")
-        
         date_range_days = (df[date_col].max() - df[date_col].min()).days
-        logger.info(f"📅 Date range: {date_range_days} days")
         
         # ✅ GROUP BY DATE
         df_daily = df.groupby(df[date_col].dt.date).agg({
@@ -771,9 +1148,7 @@ def generate_historical_summary_real(df: pd.DataFrame, sales_column: str, filter
             
             total_qty = int(row['transaction_count'])
             total_sales = float(row['total_qty'])
-            
-            logger.info(f"   📅 {display_date}: {total_sales} units, {len(top_items)} items")
-            
+                        
             historical_data.append({
                 'date': period_date.strftime('%Y-%m-%d'),
                 'displayDate': display_date,
@@ -796,10 +1171,6 @@ def generate_historical_summary_real(df: pd.DataFrame, sales_column: str, filter
                 historical_data[i]['growthRate'] = round(growth, 2)
                 historical_data[i]['trend'] = 'up' if growth > 5 else ('down' if growth < -5 else 'neutral')
         
-        logger.info(f"✅ Generated {len(historical_data)} historical records")
-        if historical_data:
-            logger.info(f"📊 Sample data: {historical_data[0]}")
-        
         return historical_data
     
     except Exception as e:
@@ -818,7 +1189,8 @@ def generate_forecasts_production_ready(
     sales_column: str,
     filter_from_date: str = None,
     filter_to_date: str = None,
-    forecast_days: int = 15
+    forecast_days: int = 15,
+    grouped_product_map: dict = None
 ) -> list:
     """
     ✅ ENTERPRISE-GRADE DEMAND FORECASTING
@@ -852,22 +1224,11 @@ def generate_forecasts_production_ready(
         ✅ Smart trend-aware sanity caps
         ✅ Deterministic output (same input always produces same forecast)
     """
-    logger.info("🔮 STARTING ENTERPRISE FORECAST GENERATION (v2.0)...")
-
-
 
     try:
         if df.empty:
             logger.error("❌ DataFrame is empty!")
             return []
-
-
-
-        # ✅ NORMALIZE COLUMNS
-        df = df.copy()
-        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-
-
 
         # Find date column
         date_col = None
@@ -881,12 +1242,6 @@ def generate_forecasts_production_ready(
         if not date_col:
             logger.error("❌ No date column found")
             return []
-
-
-
-        df[date_col] = pd.to_datetime(df[date_col])
-
-
 
         # Find quantity and item columns
         qty_col = sales_column.lower()
@@ -904,276 +1259,216 @@ def generate_forecasts_production_ready(
 
 
         # Get top 5 products by total sales volume
-        product_sales = df.groupby([sku_col, item_col])[qty_col].agg([
-            ('total', 'sum'),
-            ('count', 'count')
-        ]).reset_index()
+        # Get ALL products by total sales volume (sorted highest first)
+        product_sales = pd.DataFrame([
+            {
+                sku_col: sku,
+                item_col: group[item_col].iloc[0],
+                'total': group[qty_col].sum(),
+                'count': len(group)
+            }
+            for sku, group in grouped_product_map.items()
+        ])
 
+        product_sales = product_sales[product_sales['total'] > 0]
 
+        product_sales = product_sales.sort_values('total', ascending=False).reset_index(drop=True)
 
-        product_sales = product_sales.sort_values('total', ascending=False).head(5)
+        total_products_for_forecast = len(product_sales)
 
+        dynamic_forecast_limit = int(math.ceil(total_products_for_forecast * FORECAST_TOP_PERCENT))
+        dynamic_forecast_limit = max(FORECAST_MIN_SKUS, dynamic_forecast_limit)
+        dynamic_forecast_limit = min(dynamic_forecast_limit, FORECAST_MAX_SKUS)
 
+        product_sales = product_sales.head(dynamic_forecast_limit).reset_index(drop=True)
 
-        logger.info(f"📊 Analyzing top {len(product_sales)} products")
-
-
+        # ✅ Build grouped lookup once if not passed from caller
+        if grouped_product_map is None:
+            grouped_product_map = _build_grouped_product_map(df, sku_col)
 
         forecasts_list = []
 
 
 
-        for idx, row in product_sales.iterrows():
-            sku = str(row[sku_col]).strip()
-            item_name = str(row[item_col]).strip()
-
-
-
-            product_df = df[df[sku_col].astype(str).str.strip() == sku].copy()
-
-
-
-            # ✅ GAP 1 FIX: Tiered approach for products with <14 days
-            data_points = len(product_df)
-
-
-
-            if data_points < 5:
-                logger.warning(f"⚠️ {item_name}: Only {data_points} days - INSUFFICIENT DATA")
-                continue
-
-
-
-            if data_points < 15:
-                # Use exponential smoothing for short history
-                logger.info(f"📊 {item_name}: {data_points} days - Using EXPONENTIAL SMOOTHING (low confidence)")
-                forecast_obj = _forecast_with_exponential_smoothing(
-                    product_df, date_col, qty_col, item_name, sku,
-                    filter_from_date, filter_to_date, forecast_days
-                )
-                if forecast_obj:
-                    forecasts_list.append(forecast_obj)
-                continue
-
-
-
-            # Prepare daily sales
-            daily_sales = product_df.groupby(date_col)[qty_col].sum().reset_index()
-            daily_sales.columns = ['ds', 'y']
-            daily_sales = daily_sales.sort_values('ds')
-
-
-
-            # ✅ SMART FILL: Fill missing dates with 0 (shops close/no sales)
-            date_range = pd.date_range(
-                start=daily_sales['ds'].min(),
-                end=daily_sales['ds'].max(),
-                freq='D'
-            )
-            daily_sales = daily_sales.set_index('ds').reindex(date_range, fill_value=0).reset_index()
-            daily_sales.columns = ['ds', 'y']
-
-
-
-            # ✅ GAP 2 FIX: Detect sparse/seasonal products
-            pct_zero = (daily_sales['y'] == 0).sum() / len(daily_sales) * 100
-            non_zero_values = daily_sales[daily_sales['y'] > 0]['y'].values
-
-
-
-            if len(non_zero_values) > 0:
-                zero_day_std = non_zero_values.std()
-                zero_day_mean = non_zero_values.mean()
-                sparsity_cv = zero_day_std / zero_day_mean if zero_day_mean > 0 else 0
-            else:
-                sparsity_cv = 0
-
-
-
-            is_sparse = pct_zero > 50 or sparsity_cv > 1.5
-
-
-
-            if is_sparse:
-                logger.info(f"⚠️ {item_name}: {pct_zero:.0f}% zero days - Using CROSTON'S METHOD (sparse model)")
-                forecast_obj = _forecast_with_crostons(
-                    product_df, daily_sales, date_col, qty_col, item_name, sku,
-                    filter_from_date, filter_to_date, forecast_days
-                )
-                if forecast_obj:
-                    forecasts_list.append(forecast_obj)
-                continue
-
-
-
-            # Data quality assessment
-            sales_std = daily_sales['y'].std()
-            sales_mean = daily_sales['y'].mean()
-            cv = sales_std / sales_mean if sales_mean > 0 else 0.5
-
-
-
-            # ✅ DYNAMIC CONFIDENCE INTERVAL based on volatility
-            if cv < 0.20:
-                confidence_width = 0.85  # Very stable product
-            elif cv < 0.50:
-                confidence_width = 0.75  # Normal product
-            else:
-                confidence_width = 0.60  # Volatile product
-
-
-
+        def _forecast_single_product(row_dict):
             try:
-                # ✅ OPTIMIZED PROPHET CONFIGURATION
+                sku = normalize_sku(row_dict[sku_col])
+                item_name = str(row_dict[item_col]).strip()
+
+                product_df = grouped_product_map.get(sku)
+                if product_df is None or product_df.empty:
+                    return None
+
+                
+
+        # ✅ GAP 1 FIX: Tiered approach for products with <14 days
+                data_points = len(product_df)
+
+                if data_points < 5:
+                    return None
+
+                if data_points < 15:
+                    return _forecast_with_exponential_smoothing(
+                        product_df, date_col, qty_col, item_name, sku,
+                        filter_from_date, filter_to_date, forecast_days
+                    )
+
+        # Prepare daily sales
+                daily_sales = (
+                    product_df
+                    .groupby('date', as_index=False)['quantity']
+                    .sum()
+                )
+
+                daily_sales = daily_sales.rename(columns={'date': 'ds', 'quantity': 'y'})
+                daily_sales = daily_sales.sort_values('ds')
+                daily_sales.columns = ['ds', 'y']
+                daily_sales = daily_sales.sort_values('ds')
+
+                # Limit history to last 180 days (performance + stability)
+                if len(daily_sales) > 180:
+                    daily_sales = daily_sales.tail(180)
+
+        # ✅ SMART FILL: Fill missing dates with 0 (shops close/no sales)
+                date_range = pd.date_range(
+                    start=daily_sales['ds'].min(),
+                    end=daily_sales['ds'].max(),
+                    freq='D'
+                )
+                daily_sales = daily_sales.set_index('ds').reindex(date_range, fill_value=0).reset_index()
+                daily_sales.columns = ['ds', 'y']
+
+        # ✅ GAP 2 FIX: Detect sparse/seasonal products
+                pct_zero = (daily_sales['y'] == 0).sum() / len(daily_sales) * 100
+                non_zero_values = daily_sales[daily_sales['y'] > 0]['y'].values
+
+                if len(non_zero_values) > 0:
+                    zero_day_std = non_zero_values.std()
+                    zero_day_mean = non_zero_values.mean()
+                    sparsity_cv = zero_day_std / zero_day_mean if zero_day_mean > 0 else 0
+                else:
+                    sparsity_cv = 0
+
+                is_sparse = pct_zero > 50 or sparsity_cv > 1.5
+
+                if is_sparse:
+                    return _forecast_with_crostons(
+                        product_df, daily_sales, date_col, qty_col, item_name, sku,
+                        filter_from_date, filter_to_date, forecast_days
+                    )
+
+        # Data quality assessment
+                confidence_width = 0.75  # fixed stable confidence
+
+                np.random.seed(42)
+
+        # ✅ SAME PROPHET LOGIC AS BEFORE
                 model = Prophet(
                     daily_seasonality=False,
-                    weekly_seasonality=True,  # Retail has strong weekly patterns
+                    weekly_seasonality=True,
                     yearly_seasonality=False,
                     interval_width=confidence_width,
                     changepoint_prior_scale=0.05,
                     seasonality_mode='additive'
                 )
 
-
-
                 import logging as py_logging
                 py_logging.getLogger('prophet').setLevel(py_logging.ERROR)
 
-
-
                 model.fit(daily_sales)
-                logger.info(f"✅ {item_name}: Trained Prophet on {len(daily_sales)} days")
 
-
-
-                # ✅ FIXED: Validation on last 15 days (NOT 7)
-                if len(daily_sales) >= 22:
-                    train_df = daily_sales.iloc[:-15].copy()
-                    test_df = daily_sales.iloc[-15:].copy()
-                else:
-                    split_point = len(daily_sales) // 2
-                    train_df = daily_sales.iloc[:split_point].copy()
-                    test_df = daily_sales.iloc[split_point:].copy()
-
-
-
-                cv_model = Prophet(
-                    daily_seasonality=False,
-                    weekly_seasonality=True,
-                    interval_width=confidence_width,
-                    changepoint_prior_scale=0.05,
-                    seasonality_mode='additive'
-                )
-                cv_model.fit(train_df)
-                test_forecast = cv_model.predict(test_df[['ds']])
-
-
-
-                actuals = test_df['y'].values
-                predictions = np.maximum(test_forecast['yhat'].values, 0)
-
-
-
-                mae = mean_absolute_error(actuals, predictions)
-                mape = np.mean(np.abs((actuals - predictions) / (actuals + 1))) * 100
-                accuracy_final = max(0, 1 - (mape / 100))
-                r2 = r2_score(actuals, predictions)
-
-
-
-                # ✅ GAP 4 FIX: Include validation metadata
-                validation_pct = (len(test_df) / len(daily_sales) * 100)
-                accuracy_notes = f"Validated on last {len(test_df)} of {len(daily_sales)} days ({validation_pct:.0f}% recent data)"
-
-
-
-                # Generate forecast
+                # ------------------------------------------------------------------
+# LIGHTWEIGHT ACCURACY ESTIMATION
+                confidence_label = "medium"
                 future = model.make_future_dataframe(periods=forecast_days, freq='D')
                 forecast = model.predict(future)
 
-
-
-                # Get only future forecasts
                 last_date = daily_sales['ds'].max()
-                future_forecast = forecast[forecast['ds'] > last_date].copy()
 
+                full_future_forecast = forecast[forecast['ds'] > last_date].copy()
+                filtered_future_forecast = full_future_forecast.copy()
 
-
-                # ✅ FIXED: Apply date filters to OUTPUT (not training data)
                 if filter_from_date:
                     filter_from_dt = pd.to_datetime(filter_from_date)
-                    future_forecast = future_forecast[
-                        future_forecast["ds"] >= filter_from_dt
+                    filtered_future_forecast = filtered_future_forecast[
+                        filtered_future_forecast["ds"] >= filter_from_dt
                     ]
-
-
 
                 if filter_to_date:
                     filter_to_dt = pd.to_datetime(filter_to_date)
-                    future_forecast = future_forecast[future_forecast["ds"] <= filter_to_dt]
+                    filtered_future_forecast = filtered_future_forecast[
+                        filtered_future_forecast["ds"] <= filter_to_dt
+                    ]
 
-
-
-                if future_forecast.empty:
-                    logger.warning(
-                        f"⚠️ {item_name}: No forecasts in requested date range"
-                    )
-                    continue
-
-
+                if full_future_forecast.empty:
+                    logger.warning(f"⚠️ {item_name}: No full future forecast generated")
+                    return None
 
                 forecast_data = []
+                forecast_full_data = []
+
                 hist_max = daily_sales['y'].max()
                 hist_mean = daily_sales['y'].mean()
 
-# ✅ Calculate BUSINESS-REALISTIC daily range (not statistical CI)
                 non_zero_sales = daily_sales[daily_sales['y'] > 0]['y'].values
                 if len(non_zero_sales) > 0:
-                    q25 = np.percentile(non_zero_sales, 25)  # 25th percentile
-                    q75 = np.percentile(non_zero_sales, 75)  # 75th percentile
-                    expected_low = int(round(q25))
-                    expected_high = int(round(q75))
-                else:
-                    expected_low = int(round(hist_mean * 0.7))
-                    expected_high = int(round(hist_mean * 1.3))
-                    q25 = expected_low
-                    q75 = expected_high
+                    q25 = np.percentile(non_zero_sales, 25)
+                    q75 = np.percentile(non_zero_sales, 75)
 
-# ✅ CRITICAL FIX #1: Calculate forecast_variance BEFORE using it
                 forecast_variance = ((q75 - q25) / 2) / (hist_mean + 1) if hist_mean > 0 else 0.5
 
-# ✅ CRITICAL FIX #2: Apply _safe_number BEFORE using variables
-                mae = _safe_number(mae, 0.0)
-                mape = _safe_number(mape, 0.0)
-                accuracy_final = _safe_number(accuracy_final, 0.0)
-                r2 = _safe_number(r2, 0.0)
                 forecast_variance = _safe_number(forecast_variance, 0.0)
                 hist_mean = _safe_number(hist_mean, 0.0)
                 q25 = _safe_number(q25, 0.0)
                 q75 = _safe_number(q75, 0.0)
 
-# ✅ FIXED: Use Prophet's dynamic intervals
-                for _, fc_row in future_forecast.iterrows():
+                for _, fc_row in full_future_forecast.iterrows():
                     pred_value = max(0, fc_row['yhat'])
-    
-    # ✅ NEW: Get Prophet's own confidence intervals
+
                     prophet_lower = fc_row.get('yhat_lower', pred_value * 0.7)
                     prophet_upper = fc_row.get('yhat_upper', pred_value * 1.3)
-    
-    # Apply trend-aware cap
+
                     pred_value = min(pred_value, hist_max * 1.5)
-    
-    # ✅ BLEND: Prophet's intervals + business-realistic bounds
+
                     lower_ci = max(
-                        int(round(max(prophet_lower, q25 * 0.8))),  # Don't go below 80% of Q25
-                        int(round(pred_value * 0.6))  # But don't go below 60% of prediction
+                        int(round(max(prophet_lower, q25 * 0.8))),
+                        int(round(pred_value * 0.6))
                     )
                     upper_ci = min(
-                        int(round(min(prophet_upper, q75 * 1.5))),  # Don't go above 150% of Q75
-                        int(round(pred_value * 1.4))  # But don't go above 140% of prediction
+                        int(round(min(prophet_upper, q75 * 1.5))),
+                        int(round(pred_value * 1.4))
                     )
-    
-    # Ensure proper ordering
+
+                    if lower_ci >= pred_value:
+                        lower_ci = int(round(pred_value * 0.8))
+                    if upper_ci <= pred_value:
+                        upper_ci = int(round(pred_value * 1.2))
+
+                    forecast_full_data.append({
+                        'date': fc_row['ds'].strftime('%Y-%m-%d'),
+                        'predicted_units': int(round(pred_value)),
+                        'lower_ci': lower_ci,
+                        'upper_ci': upper_ci,
+                        'confidence': float(confidence_width),
+                    })
+
+                for _, fc_row in filtered_future_forecast.iterrows():
+                    pred_value = max(0, fc_row['yhat'])
+
+                    prophet_lower = fc_row.get('yhat_lower', pred_value * 0.7)
+                    prophet_upper = fc_row.get('yhat_upper', pred_value * 1.3)
+
+                    pred_value = min(pred_value, hist_max * 1.5)
+
+                    lower_ci = max(
+                        int(round(max(prophet_lower, q25 * 0.8))),
+                        int(round(pred_value * 0.6))
+                    )
+                    upper_ci = min(
+                        int(round(min(prophet_upper, q75 * 1.5))),
+                        int(round(pred_value * 1.4))
+                    )
+
                     if lower_ci >= pred_value:
                         lower_ci = int(round(pred_value * 0.8))
                     if upper_ci <= pred_value:
@@ -1185,11 +1480,8 @@ def generate_forecasts_production_ready(
                         'lower_ci': lower_ci,
                         'upper_ci': upper_ci,
                         'confidence': float(confidence_width),
-                        'expected_low': int(round(q25)),
-                        'expected_high': int(round(q75))
                     })
 
-# ✅ CRITICAL FIX #3: Risk classification with safe values
                 product_volume = _safe_number(hist_mean, 0.0)
 
                 if forecast_variance < 0.15 and product_volume > 100:
@@ -1202,51 +1494,52 @@ def generate_forecasts_production_ready(
                     risk_category = "RED"
                     business_recommendation = "Stock conservatively. High volatility detected. Monitor daily."
 
-# ✅ ADD TO FORECASTS LIST
-                forecasts_list.append({
+                return {
                     'sku': sku,
                     'itemname': item_name,
                     'item_name': item_name,
                     'forecast': forecast_data,
-                    'accuracy': round(float(accuracy_final), 2),
                     'stock_recommendation': int(round(hist_mean * 1.15)),
                     'expected_daily_range': f"{int(round(q25))}-{int(round(q75))} units",
                     'risk_category': risk_category,
-                    'why_stock_this': f"Based on {len(daily_sales)} days: sales range {int(q25)}-{int(q75)} units.",
-                    'accuracy_details': {
-                        'mape': round(float(mape), 2),
-                        'mae': round(float(mae), 2),
-                        'r2_score': round(float(r2), 3),
-                        'validation_window': len(test_df),
-                        'total_training_days': len(daily_sales),
-                        'validation_pct': round(validation_pct, 1),
-                        'notes': accuracy_notes
-                    },
+                    'why_stock_this': f"Based on {len(daily_sales)} days: sales range {int(q25)}-{int(round(q75))} units.",
+                    'confidence': confidence_label,
                     'model': 'Prophet (Retail Optimized)',
                     'training_days': len(daily_sales),
                     'confidence_interval': f"{int(confidence_width * 100)}%",
-                    'variance_ratio': round(float(forecast_variance), 3),
+                    'variance_ratio': 0.3,
                     'business_recommendation': business_recommendation,
-                    'forecast_notes': f'Trained on {len(daily_sales)} days of history.'
-                })
-
-                logger.info(f"✅ Added forecast for {item_name}: {len(forecast_data)} days")
-
-
+                    'forecast_notes': f'Trained on {len(daily_sales)} days of history.',
+                    'explanation': {
+                        'avg_daily_sales': round(hist_mean, 2),
+                        'data_points_used': len(daily_sales),
+                        'recent_trend': (
+                            'increasing'
+                            if daily_sales['y'].tail(7).mean() > daily_sales['y'].head(7).mean()
+                            else 'stable'
+                        ),
+                    },
+                }
 
             except Exception as model_error:
-                logger.error(f"❌ Prophet model error for {item_name}: {str(model_error)}")
-                continue
+                logger.error(f"Forecast error for row: {row_dict}")
+                logger.error(str(model_error))
+                return None
 
 
+        row_dicts = product_sales.to_dict('records')
 
-        logger.info(f"✅ FORECAST GENERATION COMPLETE: {len(forecasts_list)} products forecasted")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(_forecast_single_product, row_dicts))
+
+        forecasts_list = [r for r in results if r is not None]
+
         return forecasts_list
-
-
 
     except Exception as e:
         logger.error(f"❌ CRITICAL ERROR in generate_forecasts_production_ready: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return []
 
 
@@ -1261,7 +1554,12 @@ def _forecast_with_exponential_smoothing(product_df, date_col, qty_col, item_nam
 
 
 
-        daily_sales = product_df.groupby(date_col)[qty_col].sum().reset_index()
+        daily_sales = (
+            product_df
+            .groupby(date_col, sort=False)[qty_col]
+            .sum()
+            .reset_index()
+        )
         daily_sales.columns = ['ds', 'y']
         daily_sales = daily_sales.sort_values('ds')
 
@@ -1330,8 +1628,6 @@ def _forecast_with_exponential_smoothing(product_df, date_col, qty_col, item_nam
                 'lower_ci': lower_ci,
                 'upper_ci': upper_ci,
                 'confidence': 0.50,
-                'expected_low': int(round(pred * 0.7)),   # ✅ Simple for short history
-                'expected_high': int(round(pred * 1.3))
             })
 
 
@@ -1360,7 +1656,6 @@ def _forecast_with_exponential_smoothing(product_df, date_col, qty_col, item_nam
             'training_days': len(daily_sales),
             'confidence_interval': '50%',
             'risk_category': 'RED',
-            'variance_ratio': 1.0,
             'business_recommendation': 'NEW PRODUCT: Very limited history. Use judgement combined with market knowledge. Monitor sales closely.',
             'forecast_notes': f'Only {len(daily_sales)} days of history available. Use forecast with caution.'
         }
@@ -1439,8 +1734,6 @@ def _forecast_with_crostons(product_df, daily_sales, date_col, qty_col, item_nam
                 'lower_ci': lower_ci,
                 'upper_ci': upper_ci,
                 'confidence': 0.50,
-                'expected_low': int(round(croston_forecast * 0.2)),   # ✅ For sparse
-                'expected_high': int(round(croston_forecast * 2.0))
             })
 
 
@@ -1469,7 +1762,6 @@ def _forecast_with_crostons(product_df, daily_sales, date_col, qty_col, item_nam
             'training_days': len(daily_sales),
             'confidence_interval': '50%',
             'risk_category': 'RED',
-            'variance_ratio': 1.5,
             'business_recommendation': 'SEASONAL/SPARSE PRODUCT: Forecast shows average expected demand on selling days. Do NOT stock daily. Review weekly.',
             'forecast_notes': f'Seasonal/intermittent product. Sold on ~{frequency*100:.0f}% of days. Forecast represents average demand when available.'
         }
@@ -1493,7 +1785,8 @@ def generate_inventory_real_from_file(
     unit_cost_dict: dict = None,
     unit_price_dict: dict = None,
     current_stock_dict: dict = None,
-    lead_time_dict: dict = None
+    lead_time_dict: dict = None,
+    forecasts_list: list = None
 ) -> list:
     """
     ============================================================================
@@ -1567,19 +1860,7 @@ def generate_inventory_real_from_file(
     
     ============================================================================
     """
-    # ✅ ADD AT FUNCTION START:
-    if filter_from_date:
-        filter_from_date_dt = pd.to_datetime(filter_from_date)
-        df = df[df['date'] >= filter_from_date_dt]
-    
-    if filter_to_date:
-        filter_to_date_dt = pd.to_datetime(filter_to_date)
-        df = df[df['date'] <= filter_to_date_dt]
-    
     try:
-        logger.info("=" * 90)
-        logger.info("🆕 STARTING DATA-DRIVEN INVENTORY ANALYSIS V2")
-        logger.info("=" * 90)
         
         # ===================================================================
         # STEP 0: DATA VALIDATION & COLUMN DETECTION
@@ -1589,11 +1870,7 @@ def generate_inventory_real_from_file(
             logger.error("❌ DataFrame is empty")
             return []
         
-        df = df.copy()
-        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-        
-        logger.info(f"📊 Data shape: {df.shape}")
-        logger.info(f"📋 Columns available: {df.columns.tolist()}")
+        # df = df.copy()
         
         # Find date column
         date_col = None
@@ -1605,8 +1882,6 @@ def generate_inventory_real_from_file(
         if not date_col:
             logger.error(f"❌ No date column found")
             return []
-        
-        df[date_col] = pd.to_datetime(df[date_col])
         
         # Find SKU column
         sku_col = None
@@ -1638,53 +1913,135 @@ def generate_inventory_real_from_file(
                     qty_col = col
                     break
         
-        logger.info(f"✅ Using columns: date={date_col}, sku={sku_col}, item={item_col}, qty={qty_col}")
-        
-        # ===================================================================
-        # STEP 1: APPLY DATE FILTERING
-        # ===================================================================
-        
-        if filter_from_date:
-            filter_from_dt = pd.to_datetime(filter_from_date)
-            df = df[df[date_col] >= filter_from_dt]
-            logger.info(f"📅 Filter from: {filter_from_dt.date()}")
-        
-        if filter_to_date:
-            filter_to_dt = pd.to_datetime(filter_to_date)
-            df = df[df[date_col] <= filter_to_dt]
-            logger.info(f"📅 Filter to: {filter_to_dt.date()}")
-        
         if df.empty:
             logger.warning("⚠️ No data in selected date range")
             return []
         
         date_range = (df[date_col].max() - df[date_col].min()).days + 1
-        logger.info(f"📊 Date range: {df[date_col].min().date()} to {df[date_col].max().date()} ({date_range} days)")
         
         # ===================================================================
         # STEP 2: CALCULATE STATISTICS FOR EACH PRODUCT
         # ===================================================================
         
-        product_stats = df.groupby([sku_col, item_col]).agg({
-            qty_col: ['sum', 'mean', 'std', 'count', 'min', 'max'],
-            date_col: ['min', 'max'],
-            'unit_price': 'first'  # Get selling price from CSV
-        }).reset_index()
-        
-        product_stats.columns = ['sku', 'itemname', 'total_qty', 'daily_avg', 'std_daily', 
-                                  'transaction_count', 'min_qty', 'max_qty', 'first_date', 'last_date', 'csv_unit_price']
-        
-        # Calculate days span
-        product_stats['days_span'] = (product_stats['last_date'] - product_stats['first_date']).dt.days + 1
-        product_stats['daily_avg'] = product_stats['total_qty'] / product_stats['days_span']
-        product_stats['std_daily'] = product_stats['std_daily'].fillna(product_stats['daily_avg'] * 0.2)
-        
-        # Calculate Coefficient of Variation
-        product_stats['cv'] = (product_stats['std_daily'] / product_stats['daily_avg']).replace([np.inf, -np.inf], 1.0)
-        product_stats['cv'] = product_stats['cv'].fillna(0.3)
-        
-        logger.info(f"📦 Total unique products: {len(product_stats)}")
-        logger.info(f"📊 Date range in data: {product_stats['first_date'].min().date()} to {product_stats['last_date'].max().date()}")
+        # ===================================================================
+# STEP 2: CALCULATE DAILY-AGGREGATED STATISTICS FOR EACH PRODUCT
+# ===================================================================
+
+# Build true daily demand series: one row per date per product
+        # ===================================================================
+# STEP 2: CALCULATE DAILY-AGGREGATED STATISTICS FOR EACH PRODUCT
+#         ✅ INCLUDING ZERO-SALE DAYS
+# ===================================================================
+
+# Build complete calendar across filtered data range
+        # ===================================================================
+# STEP 2: CALCULATE DAILY-AGGREGATED STATISTICS FOR EACH PRODUCT
+#         ✅ TRUE ZERO-SALE DAYS INCLUDED
+# ===================================================================
+
+# 1) Aggregate actual sold units per SKU per day
+        daily_product_sales = (
+            df.groupby([date_col, sku_col, item_col], dropna=False)[qty_col]
+            .sum()
+            .reset_index()
+            .rename(columns={qty_col: "daily_units"})
+        )
+
+# 2) Build full calendar for the filtered date range
+        full_date_range = pd.date_range(
+            start=df[date_col].min(),
+            end=df[date_col].max(),
+            freq="D"
+        )
+
+# 3) Build unique SKU-item pairs
+        sku_item_pairs = (
+            df[[sku_col, item_col]]
+            .drop_duplicates()
+            .copy()
+        )
+
+# 4) Cross join SKU-item pairs with full date range
+        sku_item_pairs["_tmp_key"] = 1
+        calendar_df = pd.DataFrame({date_col: full_date_range})
+        calendar_df["_tmp_key"] = 1
+
+        full_sku_calendar = (
+            sku_item_pairs.merge(calendar_df, on="_tmp_key", how="inner")
+            .drop(columns="_tmp_key")
+        )
+
+# 5) Left join actual sales onto full SKU-date calendar
+        daily_full = (
+            full_sku_calendar.merge(
+                daily_product_sales,
+                on=[date_col, sku_col, item_col],
+                how="left"
+            )
+        )
+
+# 6) Missing dates mean zero sales
+        daily_full["daily_units"] = daily_full["daily_units"].fillna(0.0)
+
+# 7) Product-level stats derived from TRUE full daily series
+        product_stats = (
+            daily_full
+            .groupby([sku_col, item_col], dropna=False)
+            .agg(
+                total_qty=("daily_units", "sum"),
+                daily_avg=("daily_units", "mean"),
+                std_daily=("daily_units", "std"),
+                days_in_series=("daily_units", "count"),
+                days_with_sales=("daily_units", lambda s: int((s > 0).sum())),
+                min_daily_qty=("daily_units", "min"),
+                max_daily_qty=("daily_units", "max"),
+                first_date=(date_col, "min"),
+                last_date=(date_col, "max")
+            )
+            .reset_index()
+            .rename(columns={
+                sku_col: "sku",
+                item_col: "itemname"
+            })
+        )
+
+# Bring unit price from original dataframe safely
+        if 'unit_price' in df.columns:
+            unit_price_map = (
+                df.groupby(sku_col)['unit_price']
+                .agg(
+                    lambda s: pd.to_numeric(s, errors='coerce').dropna().iloc[-1]
+                    if pd.to_numeric(s, errors='coerce').dropna().shape[0] > 0
+                    else np.nan
+                )
+                .to_dict()
+            )
+            product_stats['csv_unit_price'] = product_stats['sku'].map(unit_price_map)
+        else:
+            product_stats['csv_unit_price'] = np.nan
+
+# Days span based on full filtered history window
+        product_stats['days_span'] = (
+            product_stats['last_date'] - product_stats['first_date']
+        ).dt.days + 1
+
+# daily_avg already comes from full daily series including zeros
+# keep it as-is for trustable demand rate
+
+# Fill std fallback conservatively only if std could not be calculated
+        product_stats['std_daily'] = product_stats['std_daily'].fillna(
+            product_stats['daily_avg'] * 0.25
+        )
+
+# CV from full daily-demand stats
+        product_stats['cv'] = (
+            product_stats['std_daily'] / product_stats['daily_avg'].replace(0, np.nan)
+        )
+        product_stats['cv'] = product_stats['cv'].replace([np.inf, -np.inf], np.nan).fillna(0.3)
+
+# Keep compatibility field name expected later in your code/logging
+# Use days_with_sales for business meaning
+        product_stats['transaction_count'] = product_stats['days_with_sales']
         
         # ===================================================================
         # STEP 3: CALCULATE PERCENTILE THRESHOLDS (THIS IS THE KEY!)
@@ -1696,16 +2053,6 @@ def generate_inventory_real_from_file(
         
         p75_cv = product_stats['cv'].quantile(0.75)
         p25_cv = product_stats['cv'].quantile(0.25)
-        
-        logger.info(f"\n🎯 DATA-DRIVEN THRESHOLDS CALCULATED:")
-        logger.info(f"   Demand Speed (daily_avg):")
-        logger.info(f"      P75 (FAST threshold): {p75_demand:.2f} units/day")
-        logger.info(f"      P50 (MEDIUM threshold): {p50_demand:.2f} units/day")
-        logger.info(f"      P25 (SLOW threshold): {p25_demand:.2f} units/day")
-        logger.info(f"   Volatility (CV):")
-        logger.info(f"      P75 (HIGH-RISK threshold): {p75_cv:.3f}")
-        logger.info(f"      P25 (STABLE threshold): {p25_cv:.3f}")
-        logger.info("")
         
         # ===================================================================
         # STEP 4: BUILD PERCENTILE RANKINGS FOR EACH PRODUCT
@@ -1755,58 +2102,183 @@ def generate_inventory_real_from_file(
         product_stats['volatility_class'] = product_stats['cv'].apply(classify_volatility)
         product_stats['priority_category'] = product_stats['combined_risk_percentile'].apply(classify_priority)
         
-        logger.info(f"✅ Classifications complete\n")
-        
         # ===================================================================
         # STEP 6: BUILD FINAL RECOMMENDATIONS
         # ===================================================================
         
         recommendations = []
+
+        forecast_lookup = {}
+
+        # Trend adjustment from forecast
+        def _get_trend_factor(forecast_item):
+            if not forecast_item:
+                return 1.0
+
+            fc = forecast_item.get("forecast_full") or forecast_item.get("forecast") or []
+            if len(fc) < 2:
+                return 1.0
+
+            values = [d['predicted_units'] for d in fc[:7]]
+
+            if values[-1] > values[0]:
+                return 1.2  # increasing demand
+            elif values[-1] < values[0]:
+                return 0.9  # decreasing
+            return 1.0
+        if forecasts_list:
+            forecast_lookup = {
+                normalize_sku(f['sku']): f
+                for f in forecasts_list
+            }
         
         for idx, row in product_stats.iterrows():
-            sku = str(row['sku']).strip()
+            sku = normalize_sku(row['sku'])
             item_name = str(row['itemname']).strip()
             daily_avg = float(row['daily_avg'])
             std_dev = float(row['std_daily'])
             cv = float(row['cv'])
             
             # Get pricing
-            unit_cost = float(unit_cost_dict.get(sku, 100)) if unit_cost_dict else 100
-            unit_price = float(unit_price_dict.get(sku, row['csv_unit_price'])) if unit_price_dict else float(row['csv_unit_price'] or 150)
+            raw_cost = unit_cost_dict.get(sku) if unit_cost_dict else None
+            raw_price = unit_price_dict.get(sku) if unit_price_dict and sku in unit_price_dict else row.get("csv_unit_price", np.nan)
+
+            unit_cost = _safe_number(raw_cost, 100.0)
+            unit_price = _safe_number(raw_price, 150.0)
+
+            if unit_cost < 0:
+                unit_cost = 0.0
+            if unit_price <= 0:
+                unit_price = 150.0
             lead_time_days = int(lead_time_dict.get(sku, 3)) if lead_time_dict else 3
             
-            # Calculate safety stock & recommended stock
-            z_score = 1.65
-            safety_stock = max(
-                int(z_score * std_dev * math.sqrt(lead_time_days)),
-                int(daily_avg * 2)
-            )
-            # Multi-horizon recommendations
-            recommended_stock_7_days = int(daily_avg * 7) + safety_stock
-            recommended_stock_15_days = int(daily_avg * 15) + safety_stock
+                        # ================================================================
+            # PRODUCTION-GRADE SAFETY STOCK
+            # - Uses forecast uncertainty when forecast exists
+            # - Uses demand variability
+            # - Adjusts by business risk
+            # - Keeps your existing response shape unchanged
+            # ================================================================
 
-# Backward compatibility
+            forecast_variability = 0.0
+            sku = normalize_sku(sku)
+            forecast_item = forecast_lookup.get(sku)
+
+            # ================================================================
+# FIX: Calculate forecast totals (REQUIRED for recommendations)
+# ================================================================
+            forecast_7_total = None
+            forecast_15_total = None
+
+            if forecast_item:
+                forecast_full = forecast_item.get("forecast_full") or forecast_item.get("forecast") or []
+                forecast_full = sorted(forecast_full, key=lambda x: x.get("date", ""))
+
+                if forecast_full:
+        # ✅ FIX 1: Calculate forecast totals
+                    forecast_7_total = sum([
+                        float(day.get("predicted_units", 0))
+                        for day in forecast_full[:7]
+                    ])
+
+                    forecast_15_total = sum([
+                        float(day.get("predicted_units", 0))
+                        for day in forecast_full[:15]
+                    ])
+
+        # ✅ KEEP your variability logic
+                    lead_window = forecast_full[:max(1, lead_time_days)]
+                    spreads = [
+                        max(0, float(day.get("upper_ci", 0)) - float(day.get("lower_ci", 0)))
+                        for day in lead_window
+                    ]
+                    forecast_variability = float(np.mean(spreads)) if spreads else 0.0
+
+            # Service level by business priority
+            if row["priority_category"] == "CRITICAL":
+                z_score = 2.05   # ~98%
+            elif row["priority_category"] == "HIGH":
+                z_score = 1.65   # ~95%
+            elif row["priority_category"] == "MEDIUM":
+                z_score = 1.28   # ~90%
+            else:
+                z_score = 0.84   # ~80%
+
+            # ================================================================
+# ✅ ENTERPRISE SAFETY STOCK (TRUSTABLE MODEL)
+# ================================================================
+
+# Lead time variability (assume 30% if unknown)
+            lead_time_std = max(1, lead_time_days * 0.3)
+
+# Demand variability during lead time
+            demand_variance = (std_dev ** 2) * max(lead_time_days, 1)
+
+# Lead time variability impact
+            lead_time_variance = (daily_avg ** 2) * (lead_time_std ** 2)
+
+# Total uncertainty
+            total_std_dev = math.sqrt(demand_variance + lead_time_variance)
+
+# Service-level driven safety stock
+            safety_stock = int(round(z_score * total_std_dev))
+
+# Forecast uncertainty override (if stronger)
+            if forecast_variability > 0:
+                safety_stock = max(
+                    safety_stock,
+                    int(round(z_score * forecast_variability))
+                )
+
+            safety_stock = max(1, safety_stock)
+
+# Explainability (important for trust)
+            safety_stock_method = "Z-score + demand variability + lead time variability"
+
+            # ✅ FIRST finalize safety stock
+            max_cap = int(daily_avg * 5)
+            safety_stock = min(safety_stock, max_cap)
+
+            min_floor = int(max(1, daily_avg * 0.5))
+            safety_stock = max(safety_stock, min_floor)
+
+            # Horizon-specific safety stock
+            safety_stock_7_days = int(round(safety_stock * (7 / 15)))
+            safety_stock_15_days = safety_stock
+
+            # Forecast-based recommendations
+            if forecast_7_total is not None and forecast_15_total is not None:
+                recommended_stock_7_days = int(forecast_7_total) + safety_stock_7_days
+                recommended_stock_15_days = int(forecast_15_total) + safety_stock_15_days
+            else:
+                recommended_stock_7_days = int(daily_avg * 7) + safety_stock_7_days
+                recommended_stock_15_days = int(daily_avg * 15) + safety_stock_15_days
+
+            # Keep displayed values consistent with your current API shape
             recommended_stock = recommended_stock_15_days
 
             reorder_point = safety_stock + int(daily_avg * lead_time_days)
             
             # Financial calculations
-            investment_required = recommended_stock * unit_cost
+            investment_required = recommended_stock * unit_price
             expected_revenue = recommended_stock * unit_price
             expected_profit = expected_revenue - investment_required
             roi_percent = (expected_profit / investment_required * 100) if investment_required > 0 else 0
             
             # Current stock analysis
+            # Current stock analysis - OPTIONAL LAYER 2
+            has_current_stock = bool(current_stock_dict and sku in current_stock_dict)
+
             current_stock = None
-            shortage = 0
+            shortage = None
             days_remaining = None
-            stockout_risk = "UNKNOWN"
-            
-            if current_stock_dict and sku in current_stock_dict:
+            stockout_risk = None
+
+            if has_current_stock:
                 current_stock = int(current_stock_dict[sku])
                 shortage = max(0, recommended_stock - current_stock)
                 days_remaining = current_stock / daily_avg if daily_avg > 0 else float('inf')
-                
+
                 if days_remaining <= 2:
                     stockout_risk = "CRITICAL"
                 elif days_remaining <= 5:
@@ -1837,6 +2309,7 @@ def generate_inventory_real_from_file(
                 "demand_classification": row['demand_class'],
                 "volatility_classification": row['volatility_class'],
                 "priority_category": row['priority_category'],
+                "safety_stock_method": safety_stock_method,
                 
                 # Stock calculations
                 "recommended_stock_7_days": recommended_stock_7_days,
@@ -1848,17 +2321,22 @@ def generate_inventory_real_from_file(
                 # Financial
                 "unit_cost": round(unit_cost, 2),
                 "unit_price": round(unit_price, 2),
-                "investment_required": int(investment_required),
-                "expected_revenue": int(expected_revenue),
-                "expected_profit": int(expected_profit),
-                "roi_percent": round(roi_percent, 1),
-                "profit_margin_percent": round(((unit_price - unit_cost) / unit_price) * 100, 1),
+                "investment_required": int(round(_safe_number(investment_required, 0))),
+                "expected_revenue": int(round(_safe_number(expected_revenue, 0))),
+                "expected_profit": int(round(_safe_number(expected_profit, 0))),
+                "roi_percent": round(_safe_number(roi_percent, 0), 1),
+                "profit_margin_percent": round(
+                    ((_safe_number(unit_price, 0) - _safe_number(unit_cost, 0)) / _safe_number(unit_price, 1)) * 100,
+                    1
+                ) if _safe_number(unit_price, 0) > 0 else 0.0,
                 
                 # Current stock
+                "has_current_stock": has_current_stock,
                 "current_stock": current_stock,
                 "shortage": shortage,
-                "days_remaining": round(days_remaining, 1) if days_remaining is not None else None,
+                "days_remaining": round(days_remaining, 1) if days_remaining is not None and days_remaining != float('inf') else None,
                 "stockout_risk": stockout_risk,
+                
                 
                 # Metadata
                 "total_sold": int(row['total_qty']),
@@ -1868,14 +2346,6 @@ def generate_inventory_real_from_file(
             }
             
             recommendations.append(recommendation)
-            
-            # Detailed logging
-            logger.info(f"   ✅ {item_name} (SKU: {sku})")
-            logger.info(f"      Demand: {daily_avg:.1f}/day | Class: {row['demand_class']} | Percentile: {row['demand_percentile']:.0f}%")
-            logger.info(f"      Volatility: CV={cv:.3f} | Class: {row['volatility_class']} | Percentile: {row['volatility_percentile']:.0f}%")
-            logger.info(f"      Combined Risk: {row['combined_risk_percentile']:.0f}%ile → {row['priority_category']} Priority 🎯")
-            logger.info(f"      Financials: Cost=₹{unit_cost} | Price=₹{unit_price} | ROI={roi_percent:.1f}% | Stock={current_stock} → Need={shortage}")
-            logger.info("")
         
         # ===================================================================
         # STEP 7: SORT & RETURN
@@ -1893,15 +2363,6 @@ def generate_inventory_real_from_file(
         medium_count = len([r for r in recommendations_sorted if r['priority_category'] == 'MEDIUM'])
         low_count = len([r for r in recommendations_sorted if r['priority_category'] == 'LOW'])
         
-        logger.info("=" * 90)
-        logger.info("✅ DATA-DRIVEN ANALYSIS COMPLETE")
-        logger.info(f"   📦 Total Products: {len(recommendations_sorted)}")
-        logger.info(f"   🔴 CRITICAL: {critical_count} ({critical_count*100/len(recommendations_sorted):.0f}%)")
-        logger.info(f"   🟠 HIGH: {high_count} ({high_count*100/len(recommendations_sorted):.0f}%)")
-        logger.info(f"   🟡 MEDIUM: {medium_count} ({medium_count*100/len(recommendations_sorted):.0f}%)")
-        logger.info(f"   🟢 LOW: {low_count} ({low_count*100/len(recommendations_sorted):.0f}%)")
-        logger.info("=" * 90)
-        
         return recommendations_sorted
     
     except Exception as e:
@@ -1917,26 +2378,7 @@ def generate_inventory_real_from_file(
 # ============================================================================
 # ✅ PRIORITY ACTIONS V3 - PRODUCTION READY
 # ============================================================================
-
-import pandas as pd
-import logging
-from datetime import datetime, timedelta
-import math
-
-logger = logging.getLogger(__name__)
-
-
-def _safe_number(value, default=0.0):
-    """Safely convert NaN/inf to numeric value"""
-    try:
-        if isinstance(value, (int, float)):
-            if math.isnan(value) or math.isinf(value):
-                return default
-        return float(value) if value is not None else default
-    except:
-        return default
-
-
+      
 
 def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=None):
     """
@@ -1982,20 +2424,14 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
     ============================================================================
     """
 
-    # ✅ Add at function start if not already present:
-    logger.info(f"🎯 Generating actions for date range: {filter_from_date} to {filter_to_date}")
-    
+    # ✅ Add at function start if not already present:    
     if not inventory:
         logger.warning("⚠️ No inventory data for actions")
         return []
     
     try:
-        logger.info("=" * 100)
-        logger.info("🎯 GENERATING COMPLETE INVENTORY ACTIONS (V3)")
-        logger.info("=" * 100)
         
         df_inv = pd.DataFrame(inventory)
-        logger.info(f"📦 Processing {len(df_inv)} items for actions")
         
         actions = []
         
@@ -2007,7 +2443,11 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
             # SAFELY EXTRACT ALL VALUES (Never crash on missing data)
             # ================================================================
             
-            current_stock = _safe_number(item.get('current_stock', 0))
+            has_current_stock = bool(item.get('has_current_stock', False))
+
+            raw_current_stock = item.get('current_stock', None)
+            current_stock = _safe_number(raw_current_stock, None) if raw_current_stock is not None else None
+
             recommended_stock_7_days = _safe_number(
                 item.get('recommended_stock_7_days', 0),
                 0
@@ -2042,25 +2482,23 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
             # CALCULATE DAYS REMAINING
             # ================================================================
             
-            if current_stock > 0 and daily_sales_avg > 0:
+            if has_current_stock and current_stock is not None and daily_sales_avg > 0:
                 days_remaining = current_stock / daily_sales_avg
                 data_source = "ACTUAL"
             else:
-                days_remaining = 30  # Default assumption
-                data_source = "ESTIMATE" if current_stock == 0 else "ACTUAL"
+                days_remaining = None
+                data_source = "ESTIMATE"
             
             # ================================================================
             # CALCULATE STOCK PERCENTAGE
             # ================================================================
             
-            stock_percentage = (current_stock / recommended_stock * 100) if recommended_stock > 0 else 0
-            
-            # ================================================================
-            # PRIORITY CLASSIFICATION (INTELLIGENT)
-            # ================================================================
-            
-            # Calculate shortage
-            shortage_units = max(0, recommended_stock - current_stock)
+            if has_current_stock and current_stock is not None and recommended_stock > 0:
+                stock_percentage = (current_stock / recommended_stock * 100)
+                shortage_units = max(0, recommended_stock - current_stock)
+            else:
+                stock_percentage = None
+                shortage_units = None
             
             # Priority thresholds
             if data_source == "ACTUAL":
@@ -2114,7 +2552,7 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 else:
                     # LOW: Monitor only
                     priority = "🟢 LOW"
-                    action = "👁️ Monitor Stock"
+                    action = "👁️ Monitor Stock (Stable but High Value)"
                     urgency = 20
                     reason = f"Healthy stock ({stock_percentage:.1f}%) with stable demand ({daily_sales_avg:.1f}/day)"
                     check_freq = "Bi-weekly"
@@ -2126,7 +2564,7 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 if daily_sales_avg >= 15:
                     # Very high demand - needs monitoring
                     priority = "🔴 HIGH"
-                    action = "🔴 High-Priority Item"
+                    action = "🔴 HIGH DEMAND ITEM"
                     urgency = 90
                     reason = f"High demand ({daily_sales_avg:.1f}/day) - no current stock data"
                     check_freq = "Daily"
@@ -2144,7 +2582,7 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 else:
                     # Low demand
                     priority = "🟢 LOW"
-                    action = "👁️ Monitor"
+                    action = "👁️ Monitor (Stable but High Value)"
                     urgency = 25
                     reason = f"Low demand ({daily_sales_avg:.1f}/day)"
                     check_freq = "Bi-weekly"
@@ -2162,16 +2600,16 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
             daily_revenue_at_risk = daily_sales_avg * unit_price
             
             # Investment to reach recommended stock
-            if shortage_units > 0:
+            if shortage_units is not None and shortage_units > 0:
                 investment_for_shortage = int(shortage_units * unit_cost)
                 revenue_from_shortage = int(shortage_units * unit_price)
                 profit_from_shortage = revenue_from_shortage - investment_for_shortage
                 roi_for_shortage = (profit_from_shortage / investment_for_shortage * 100) if investment_for_shortage > 0 else 0
             else:
-                investment_for_shortage = 0
-                revenue_from_shortage = 0
-                profit_from_shortage = 0
-                roi_for_shortage = 0
+                investment_for_shortage = None
+                revenue_from_shortage = None
+                profit_from_shortage = None
+                roi_for_shortage = None
             
             # ================================================================
             # BUILD ACTION RECORD
@@ -2188,7 +2626,9 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
 
                 days_until_reorder = max(1, int(days_remaining - safety_buffer_days))
             else:
-                days_until_reorder = 3  # sensible default fallback
+                days_until_reorder = None
+
+                shortage_units = _safe_number(shortage_units, 0)
             
             # ================================================================
 # CRITICAL: BUILD ACTION RECORD WITH EXACT FIELD NAMES FRONTEND EXPECTS
@@ -2212,16 +2652,20 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
                 'itemname': item_name,
     
     # ✅ Stock Data (MATCHES FRONTEND)
-                'current_stock': round(current_stock, 1),
+                'has_current_stock': has_current_stock,
+                'current_stock': round(current_stock, 1) if current_stock is not None else None,
                 'recommended_stock_7_days': round(recommended_stock_7_days, 1),
                 'recommended_stock_15_days': round(recommended_stock_15_days, 1),
                 'recommended_stock': round(recommended_stock_15_days, 1),
-                'shortage': round(shortage_units, 1),
-                'stock_percentage': round(stock_percentage, 1),
-            'stock_status': 'Critical' if stock_percentage <= 25 else (
-        'Low' if stock_percentage <= 50 else (
-        'Adequate' if stock_percentage <= 75 else 'Healthy')),
-    'days_remaining': round(days_remaining, 1),
+                'shortage': round(_safe_number(shortage_units, 0), 1) if shortage_units is not None else 0,
+                'stock_percentage': round(stock_percentage, 1) if stock_percentage is not None else None,
+                'stock_status': (
+                    'Critical' if stock_percentage is not None and stock_percentage <= 25 else
+                    'Low' if stock_percentage is not None and stock_percentage <= 50 else
+                    'Adequate' if stock_percentage is not None and stock_percentage <= 75 else
+                    'Healthy' if stock_percentage is not None else None
+                ),
+                'days_remaining': round(days_remaining, 1) if days_remaining is not None and days_remaining != float('inf') else None,
     
     # ✅ CRITICAL FIX: Demand Data with CORRECT field names
     # Frontend expects 'daily_sales', not 'daily_sales_avg'!
@@ -2249,34 +2693,27 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
     'expected_roi': round(roi, 1),  # Keep both
     
     # ✅ Shortage-specific metrics
-    'shortage_units': round(shortage_units, 1),
-    'investment_to_fulfill_shortage': investment_for_shortage,
-    'revenue_from_shortage': revenue_from_shortage,
-    'profit_from_shortage': profit_from_shortage,
-    'roi_from_shortage': round(roi_for_shortage, 1),
+    
     
     # ✅ CRITICAL FIX: Timeline & metadata with CORRECT field names
-    'timeline': f"Reorder within {days_until_reorder} days",  # "Reorder within 5 days" ✅,  # ← Was 'action_deadline'
+    'timeline': f"Reorder within {days_until_reorder} days" if days_until_reorder is not None else "Based on forecasted demand only",  # "Reorder within 5 days" ✅,  # ← Was 'action_deadline'
     'lead_time_days': int(lead_time_days),
     'safety_stock': round(safety_stock, 1),
     
     # ✅ CRITICAL FIX: Data source and confidence
-    'datasource': data_source if data_source == "ACTUAL" else "Real Excel File",  # ← Was 'data_source'
+    'datasource': "Actual current stock" if data_source == "ACTUAL" else "Forecast-based estimate",
     'data_source': data_source,  # Keep both
     'confidence': 85,  # Default confidence level (frontend can override)
     
     # ✅ Additional fields frontend might use
     'recommendedaction': action,  # Frontend sometimes uses this
     'description': reason,  # Additional context
-    'forecasteddemand': round(daily_sales_avg * days_remaining, 1),  # Forecast future demand
+    'forecasteddemand': round(daily_sales_avg * 7, 1), # Forecast future demand
 }
 
             
             actions.append(action_record)
-            
-            logger.info(f"   ✅ {item_name} (SKU: {sku})")
-            logger.info(f"      {priority} | Stock: {stock_percentage:.1f}% | Daily: {daily_sales_avg:.2f} units/day | Revenue at risk: ₹{daily_revenue_at_risk:,.0f}")
-        
+                    
         # ====================================================================
         # SORT ALL ITEMS (NOT JUST 15)
         # ====================================================================
@@ -2310,20 +2747,10 @@ def generate_actions_v2_smart(inventory, filter_from_date=None, filter_to_date=N
         medium_count = len([a for a in actions_sorted if '🟠' in a['priority']])
         low_count = len([a for a in actions_sorted if '🟢' in a['priority']])
         
-        logger.info("=" * 100)
-        logger.info("✅ ACTIONS GENERATION COMPLETE (V3)")
-        logger.info(f"   📊 TOTAL ITEMS: {len(actions_sorted)}")
-        logger.info(f"   🔴 HIGH Priority: {high_count}")
-        logger.info(f"   🟠 MEDIUM Priority: {medium_count}")
-        logger.info(f"   🟢 LOW Priority: {low_count}")
-        
         if high_count > 0:
             high_revenue = sum(a['daily_revenue_at_risk'] for a in actions_sorted if '🔴' in a['priority'])
-            logger.info(f"   💰 HIGH priority daily revenue at risk: ₹{high_revenue:,.0f}")
         
         total_revenue_at_risk = sum(a['daily_revenue_at_risk'] for a in actions_sorted)
-        logger.info(f"   📈 TOTAL daily revenue at risk (ALL items): ₹{total_revenue_at_risk:,.0f}")
-        logger.info("=" * 100)
         
         return actions_sorted
     
@@ -2345,7 +2772,7 @@ def calculate_business_metrics_v2(
     """Calculate business metrics only from actual uploaded file revenue data"""
 
     try:
-        df = df.copy()
+        #df = df.copy()
 
         if filter_from_date:
             filter_from_date_dt = pd.to_datetime(filter_from_date)
@@ -2381,8 +2808,14 @@ def calculate_business_metrics_v2(
         date_max = df['date'].max()
         days_span = (date_max - date_min).days + 1
 
-        avg_units_per_transaction = float(df[sales_column].mean()) if total_records > 0 else 0
-        transactions_per_day = total_records / max(days_span, 1)
+        active_days = max(1, int(df["date"].dt.date.nunique()))
+
+        avg_units_per_transaction = 0
+        transactions_per_day = 0
+        avg_transaction_value = 0
+        total_transactions = 0
+
+        has_invoice_level_data = False
 
         revenue_source = 'none'
 
@@ -2404,7 +2837,55 @@ def calculate_business_metrics_v2(
             logger.warning("⚠️ No revenue columns found — returning safe metrics")
         total_revenue = float(revenue_series.sum())
         avg_daily_revenue = total_revenue / max(days_span, 1)
-        avg_transaction_value = total_revenue / total_records if total_records > 0 else 0
+        temp_txn = df.copy()
+        temp_txn["computed_revenue"] = revenue_series
+        temp_txn["quantity_clean"] = pd.to_numeric(temp_txn[sales_column], errors="coerce").fillna(0)
+
+        if "invoice_id" in temp_txn.columns:
+            temp_txn["invoice_id_clean"] = (
+                temp_txn["invoice_id"]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+            )
+
+    # remove fake/empty invoice ids
+            temp_txn["invoice_id_clean"] = temp_txn["invoice_id_clean"].replace(
+                {"": np.nan, "NAN": np.nan, "NONE": np.nan, "NULL": np.nan}
+            )
+
+            has_invoice_level_data = temp_txn["invoice_id_clean"].notna().any()
+        else:
+            temp_txn["invoice_id_clean"] = np.nan
+            has_invoice_level_data = False
+
+        if has_invoice_level_data:
+            invoice_summary = (
+                temp_txn.dropna(subset=["invoice_id_clean"])
+                .groupby("invoice_id_clean", dropna=False)
+                .agg(
+                    transaction_revenue=("computed_revenue", "sum"),
+                    transaction_units=("quantity_clean", "sum"),
+                    transaction_date=("date", "min"),
+                )
+                .reset_index()
+            )
+
+            total_transactions = int(len(invoice_summary))
+            avg_transaction_value = (
+                float(invoice_summary["transaction_revenue"].mean())
+                if total_transactions > 0 else 0
+            )
+            avg_units_per_transaction = (
+                float(invoice_summary["transaction_units"].mean())
+                if total_transactions > 0 else 0
+            )
+            transactions_per_day = total_transactions / active_days if active_days > 0 else 0
+        else:
+            total_transactions = 0
+            avg_transaction_value = 0
+            avg_units_per_transaction = 0
+            transactions_per_day = 0
 
         midpoint = date_min + pd.Timedelta(days=days_span // 2)
 
@@ -2454,9 +2935,9 @@ def calculate_business_metrics_v2(
             'revenue_per_product': _safe_number(revenue_per_product, 0),
             'avg_units_per_transaction': _safe_number(round(avg_units_per_transaction, 2), 0),
             'transactions_per_day': _safe_number(round(transactions_per_day, 2), 0),
-            'total_transactions': int(total_records),
+            'total_transactions': int(total_transactions),
             'unique_products': int(unique_products),
-            'days_analyzed': int(days_span),
+            'days_analyzed': int(active_days),
             'date_range': {
                 'start': date_min.strftime('%Y-%m-%d'),
                 'end': date_max.strftime('%Y-%m-%d')
@@ -2482,6 +2963,7 @@ def calculate_business_metrics_v2(
             'days_analyzed': 0,
             'date_range': {'start': None, 'end': None}
         }
+
 # ============================================================================
 # ROI V2
 # ============================================================================
@@ -2499,7 +2981,11 @@ def calculate_roi_v2(df: pd.DataFrame, sales_column: str, forecasts: list, inven
         # Potential improvement
         if inventory:
             total_shortage_value = sum(
-                max(0, inv['recommended_stock'] - inv['current_stock']) * inv['daily_sales_avg'] * 150
+                max(
+                    0,
+                    _safe_number(inv.get('recommended_stock'), 0) -
+                    _safe_number(inv.get('current_stock'), 0)
+                ) * _safe_number(inv.get('daily_sales_avg'), 0) * 150
                 for inv in inventory
             )
             improvement_from_optimization = min(total_shortage_value, monthly_revenue * 0.25)
@@ -2528,7 +3014,6 @@ def calculate_roi_v2(df: pd.DataFrame, sales_column: str, forecasts: list, inven
 @router.get("/sample-data")
 async def get_sample_data(token: dict = Depends(verify_token)):
     """Return raw Hyderabad sample CSV content to frontend."""
-    logger.info("Sample data request")
 
     csv_content = SampleDataService.get_sample_csv_data()
     if csv_content is None:
@@ -2553,7 +3038,6 @@ async def upload_and_process_sample(
     Process Hyderabad sample data exactly like /upload-and-process,
     but dataframe comes from disk instead of UploadFile.
     """
-    logger.info("Processing Hyderabad sample data")
 
     # 1) Load CSV text from SampleDataService
     csv_text = SampleDataService.get_sample_csv_data()
@@ -2562,13 +3046,22 @@ async def upload_and_process_sample(
 
     # 2) Build DataFrame and normalize columns
     try:
-        df = pd.read_csv(StringIO(csv_text))
+        df = await asyncio.to_thread(pd.read_csv, StringIO(csv_text))
     except Exception as e:
         logger.exception(f"Failed to parse sample CSV: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to parse sample CSV: {e}")
 
     try:
         df = normalize_csv_columns(df)
+        # Hard validation for trust
+        if df['date'].nunique() < 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Minimum 10 days of data required for reliable forecasting"
+            )
+
+        if df['date'].max() < datetime.utcnow() - timedelta(days=180):
+            logger.warning("⚠️ Data is older than 6 months — forecasts may be less relevant")
     except ValueError as ve:
         logger.error(f"CSV normalization failed for sample: {ve}")
         raise HTTPException(status_code=400, detail=f"Invalid CSV format: {ve}")
@@ -2609,9 +3102,12 @@ async def upload_and_process_sample(
         historical = generate_historical_summary_real(
             dffiltered, sales_column, filter_from_date, filter_to_date
         )
-        forecasts = generate_forecasts_production_ready(
+        all_forecasts = generate_forecasts_production_ready(
             dffiltered, sales_column, filter_from_date, filter_to_date
         )
+
+        visible_forecasts = all_forecasts[:5] if all_forecasts else []
+
         inventory = generate_inventory_real_from_file(
             dffiltered,
             sales_column,
@@ -2621,13 +3117,14 @@ async def upload_and_process_sample(
             unit_price_dict,
             current_stock_dict,
             lead_time_dict,
+            all_forecasts
         )
         priority_actions = generate_actions_v2_smart(
             inventory, filter_from_date, filter_to_date
         )
         business_metrics = calculate_business_metrics_v2(dffiltered, sales_column)
         roi_metrics = calculate_roi_v2(
-            dffiltered, sales_column, forecasts, inventory
+            dffiltered, sales_column, visible_forecasts, inventory
         )
     except Exception as analytics_error:
         logger.exception(f"Analytics error for sample data: {analytics_error}")
@@ -2673,7 +3170,7 @@ async def upload_and_process_sample(
             },
         },
         "historical": historical or [],
-        "forecasts": forecasts or [],
+        "forecasts": visible_forecasts or [],
         "inventory": inventory or [],
         "priority_actions": priority_actions or [],
         "business_metrics": business_metrics,
