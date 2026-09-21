@@ -11,7 +11,7 @@ from app.services.database_service import DatabaseService
 
 from datetime import datetime, timedelta
 
-from app.routes import forecast_routes, auth_routes , inventory_routes
+from app.routes import forecast_routes, auth_routes , inventory_routes , ingest, voice_routes
 load_dotenv()
 
 # ========== SETUP ==========
@@ -60,6 +60,8 @@ app.include_router(auth_routes.router, prefix="/auth", tags=["authentication"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 app.include_router(forecast_routes.router)
 app.include_router(inventory_routes.router)
+app.include_router(ingest.router)
+app.include_router(voice_routes.router)
 print("✅ Forecast router loaded")
 # ========== ROOT ENDPOINTS ==========
 
