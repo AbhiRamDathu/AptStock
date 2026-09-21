@@ -258,15 +258,16 @@ export default function VoiceAgent() {
           );
         }
 
-        const base64Audio =
-          btoa(binary);
+        const base64Audio = btoa(binary);
 
-        ws.send(
-          JSON.stringify({
-            type: "input.audio",
-            audio: base64Audio
-          })
-        );
+        if (ws.bufferedAmount < 256000) {
+          ws.send(
+            JSON.stringify({
+              type: "input.audio",
+              audio: base64Audio
+            })
+          );
+        }
       };
 
       setStatus("Listening...");
