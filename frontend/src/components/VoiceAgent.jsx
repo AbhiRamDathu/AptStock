@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const VOICE_SERVER_URL = "https://aptstock-backend.onrender.com/api/voice";
+const VOICE_SERVER_URL = "https://aptstock.onrender.com/api/voice";
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
