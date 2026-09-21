@@ -188,7 +188,7 @@ export default function VoiceAgent() {
        */
       const processor =
         audioContext.createScriptProcessor(
-          4096,
+          1200,
           1,
           1
         );
