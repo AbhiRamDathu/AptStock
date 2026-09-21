@@ -1,33 +1,324 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 
 const VOICE_SERVER_URL = "https://aptstock.onrender.com/api/voice";
+const SAMPLE_RATE = 24000;
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [transcript, setTranscript] = useState("");
 
+  const wsRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const micSourceRef = useRef(null);
+  const processorRef = useRef(null);
+  const silentGainRef = useRef(null);
+
+  const playbackContextRef = useRef(null);
+  const playbackNextTimeRef = useRef(0);
+  const playbackSourcesRef = useRef([]);
+
+  const cleanup = () => {
+    try {
+      if (processorRef.current) {
+        processorRef.current.onaudioprocess = null;
+        processorRef.current.disconnect();
+      }
+
+      if (micSourceRef.current) {
+        micSourceRef.current.disconnect();
+      }
+
+      if (silentGainRef.current) {
+        silentGainRef.current.disconnect();
+      }
+
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+      }
+    } catch (error) {
+      console.warn("Audio cleanup error:", error);
+    }
+
+    processorRef.current = null;
+    micSourceRef.current = null;
+    silentGainRef.current = null;
+    micStreamRef.current = null;
+    audioContextRef.current = null;
+
+    playbackSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {}
+    });
+
+    playbackSourcesRef.current = [];
+    playbackNextTimeRef.current = 0;
+  };
+
+  const flushPlayback = () => {
+    playbackSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {}
+    });
+
+    playbackSourcesRef.current = [];
+
+    if (playbackContextRef.current) {
+      playbackNextTimeRef.current =
+        playbackContextRef.current.currentTime;
+    }
+  };
+
+  const playReplyAudio = async (base64Audio) => {
+    try {
+      if (!base64Audio) return;
+
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContext();
+      }
+
+      const ctx = playbackContextRef.current;
+
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      // Base64 → binary
+      const binary = atob(base64Audio);
+      const pcm16 = new Int16Array(binary.length / 2);
+
+      for (let i = 0; i < pcm16.length; i++) {
+        const low = binary.charCodeAt(i * 2);
+        const high = binary.charCodeAt(i * 2 + 1);
+
+        pcm16[i] = low | (high << 8);
+      }
+
+      // PCM16 → Float32
+      const float32 = new Float32Array(pcm16.length);
+
+      for (let i = 0; i < pcm16.length; i++) {
+        float32[i] =
+          pcm16[i] < 0
+            ? pcm16[i] / 32768
+            : pcm16[i] / 32767;
+      }
+
+      // AssemblyAI reply audio is 24 kHz mono PCM16.
+      const audioBuffer = ctx.createBuffer(
+        1,
+        float32.length,
+        SAMPLE_RATE
+      );
+
+      audioBuffer.copyToChannel(float32, 0);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+
+      if (playbackNextTimeRef.current < now) {
+        playbackNextTimeRef.current = now;
+      }
+
+      source.start(playbackNextTimeRef.current);
+
+      playbackNextTimeRef.current += audioBuffer.duration;
+
+      playbackSourcesRef.current.push(source);
+
+      source.onended = () => {
+        playbackSourcesRef.current =
+          playbackSourcesRef.current.filter((s) => s !== source);
+      };
+    } catch (error) {
+      console.error("Reply audio playback error:", error);
+    }
+  };
+
+  const startMicrophone = async (ws) => {
+    try {
+      setStatus("Starting microphone...");
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+      micStreamRef.current = stream;
+
+      const audioContext = new AudioContext({
+        sampleRate: SAMPLE_RATE
+      });
+
+      audioContextRef.current = audioContext;
+
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      console.log(
+        "🎙️ Microphone AudioContext sample rate:",
+        audioContext.sampleRate
+      );
+
+      const source =
+        audioContext.createMediaStreamSource(stream);
+
+      micSourceRef.current = source;
+
+      /*
+       * ScriptProcessorNode is used here to keep this implementation
+       * self-contained inside VoiceAgent.jsx.
+       */
+      const processor =
+        audioContext.createScriptProcessor(
+          4096,
+          1,
+          1
+        );
+
+      processorRef.current = processor;
+
+      // Keep processor alive without sending microphone audio
+      // to the speakers.
+      const silentGain =
+        audioContext.createGain();
+
+      silentGain.gain.value = 0;
+
+      silentGainRef.current = silentGain;
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+
+      processor.onaudioprocess = (event) => {
+        if (
+          !ws ||
+          ws.readyState !== WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        const input =
+          event.inputBuffer.getChannelData(0);
+
+        /*
+         * Convert Float32 microphone samples
+         * into signed 16-bit PCM little-endian.
+         */
+        const pcm16 =
+          new Int16Array(input.length);
+
+        for (let i = 0; i < input.length; i++) {
+          const sample =
+            Math.max(-1, Math.min(1, input[i]));
+
+          pcm16[i] =
+            sample < 0
+              ? sample * 0x8000
+              : sample * 0x7fff;
+        }
+
+        // Int16Array → binary string → base64
+        const bytes = new Uint8Array(
+          pcm16.buffer
+        );
+
+        let binary = "";
+
+        const chunkSize = 0x8000;
+
+        for (
+          let i = 0;
+          i < bytes.length;
+          i += chunkSize
+        ) {
+          binary += String.fromCharCode(
+            ...bytes.subarray(
+              i,
+              Math.min(i + chunkSize, bytes.length)
+            )
+          );
+        }
+
+        const base64Audio =
+          btoa(binary);
+
+        ws.send(
+          JSON.stringify({
+            type: "input.audio",
+            audio: base64Audio
+          })
+        );
+      };
+
+      setStatus("Listening...");
+      console.log("🎙️ Microphone streaming started");
+    } catch (error) {
+      console.error(
+        "❌ Microphone access error:",
+        error
+      );
+
+      setStatus(
+        "Microphone permission required"
+      );
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    }
+  };
+
   const startVoiceAgent = async () => {
     try {
       setStatus("Connecting...");
+      setTranscript("");
 
+      // Get temporary AssemblyAI token
       const response = await fetch(
         `${VOICE_SERVER_URL}/token`
       );
 
       if (!response.ok) {
-        throw new Error("Could not get voice token");
+        throw new Error(
+          `Token request failed: ${response.status}`
+        );
       }
 
-      const { token } = await response.json();
+      const { token } =
+        await response.json();
+
+      console.log("✅ Voice token received");
 
       const ws = new WebSocket(
         `wss://agents.assemblyai.com/v1/ws?token=${token}`
       );
 
+      wsRef.current = ws;
+
       ws.onopen = () => {
-        setConnected(true);
-        setStatus("Listening...");
+        console.log(
+          "✅ AssemblyAI WebSocket connected"
+        );
+
+        setStatus("Initializing voice agent...");
 
         ws.send(
           JSON.stringify({
@@ -50,36 +341,200 @@ export default function VoiceAgent() {
         );
       };
 
-      ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
+      ws.onmessage = async (event) => {
+        try {
+          const message =
+            JSON.parse(event.data);
 
-        if (message.type === "transcript.user") {
-          setTranscript(`You: ${message.text}`);
-        }
+          console.log(
+            "🤖 Voice event:",
+            message.type
+          );
 
-        if (message.type === "transcript.agent") {
-          setTranscript(`AptStock: ${message.text}`);
-        }
+          if (
+            message.type ===
+            "session.ready"
+          ) {
+            console.log(
+              "✅ AssemblyAI session ready:",
+              message.session_id
+            );
 
-        if (message.type === "session.error") {
-          console.error(message);
-          setStatus("Voice error");
+            setConnected(true);
+
+            // IMPORTANT:
+            // Microphone starts only AFTER session.ready.
+            await startMicrophone(ws);
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "transcript.user.delta"
+          ) {
+            setTranscript(
+              `You: ${message.text || ""}`
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "transcript.user"
+          ) {
+            setTranscript(
+              `You: ${message.text || ""}`
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "transcript.agent"
+          ) {
+            setTranscript(
+              `AptStock: ${message.text || ""}`
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "reply.audio"
+          ) {
+            // AssemblyAI sends audio in `data`
+            await playReplyAudio(
+              message.data
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "reply.done"
+          ) {
+            if (
+              message.status ===
+              "interrupted"
+            ) {
+              flushPlayback();
+            }
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "session.error"
+          ) {
+            console.error(
+              "❌ AssemblyAI session error:",
+              message
+            );
+
+            setStatus(
+              `Voice error: ${
+                message.message ||
+                message.code ||
+                "Unknown error"
+              }`
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "input.speech.started"
+          ) {
+            console.log(
+              "🎤 Speech detected"
+            );
+
+            return;
+          }
+
+          if (
+            message.type ===
+            "input.speech.stopped"
+          ) {
+            console.log(
+              "🎤 Speech ended"
+            );
+
+            return;
+          }
+        } catch (error) {
+          console.error(
+            "Voice message processing error:",
+            error
+          );
         }
       };
 
-      ws.onclose = () => {
+      ws.onerror = (error) => {
+        console.error(
+          "❌ Voice WebSocket error:",
+          error
+        );
+
+        setStatus(
+          "Voice connection error"
+        );
+      };
+
+      ws.onclose = (event) => {
+        console.log(
+          "🔌 Voice WebSocket closed:",
+          event.code,
+          event.reason
+        );
+
+        cleanup();
+
         setConnected(false);
         setStatus("Disconnected");
       };
-
-      ws.onerror = () => {
-        setStatus("Connection error");
-      };
-
     } catch (error) {
-      console.error("Voice agent error:", error);
-      setStatus("Unable to connect");
+      console.error(
+        "❌ Voice agent error:",
+        error
+      );
+
+      cleanup();
+
+      setConnected(false);
+      setStatus(
+        error.message ||
+        "Unable to connect"
+      );
     }
+  };
+
+  const stopVoiceAgent = () => {
+    console.log(
+      "🛑 Stopping voice agent..."
+    );
+
+    cleanup();
+
+    if (
+      wsRef.current &&
+      wsRef.current.readyState ===
+        WebSocket.OPEN
+    ) {
+      wsRef.current.close();
+    }
+
+    wsRef.current = null;
+
+    setConnected(false);
+    setStatus("Ready");
   };
 
   return (
@@ -92,7 +547,9 @@ export default function VoiceAgent() {
         margin: "20px 0"
       }}
     >
-      <h3>🎙️ AptStock Voice Assistant</h3>
+      <h3>
+        🎙️ AptStock Voice Assistant
+      </h3>
 
       <p>{status}</p>
 
@@ -109,18 +566,31 @@ export default function VoiceAgent() {
         </div>
       )}
 
-      <button
-        onClick={startVoiceAgent}
-        disabled={connected}
-        style={{
-          padding: "12px 20px",
-          borderRadius: "10px",
-          border: "none",
-          cursor: connected ? "default" : "pointer"
-        }}
-      >
-        {connected ? "🎙️ Listening..." : "🎙️ Talk to AptStock"}
-      </button>
+      {!connected ? (
+        <button
+          onClick={startVoiceAgent}
+          style={{
+            padding: "12px 20px",
+            borderRadius: "10px",
+            border: "none",
+            cursor: "pointer"
+          }}
+        >
+          🎙️ Talk to AptStock
+        </button>
+      ) : (
+        <button
+          onClick={stopVoiceAgent}
+          style={{
+            padding: "12px 20px",
+            borderRadius: "10px",
+            border: "none",
+            cursor: "pointer"
+          }}
+        >
+          🛑 Stop
+        </button>
+      )}
     </div>
   );
 }
