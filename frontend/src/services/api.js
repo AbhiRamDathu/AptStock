@@ -227,6 +227,27 @@ try {
 },
 };
 
+// Inventory API
+export const inventoryAPI = {
+
+  getAlerts: async (store) => {
+    if (!store) {
+      throw new Error('Store is required');
+    }
+
+    const params = new URLSearchParams();
+    params.append('store', store);
+
+    return apiCall(
+      `/api/inventory-alerts?${params.toString()}`,
+      {
+        method: 'GET',
+      }
+    );
+  },
+
+};
+
 export const trialAPI = {
   // Get current trial/subscription info
   getTrialInfo: async () => {
@@ -258,4 +279,5 @@ export const trialAPI = {
   export default {
     auth: authAPI,
     forecast: forecastAPI,
+    inventory: inventoryAPI,
   }
