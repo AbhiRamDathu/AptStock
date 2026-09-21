@@ -3,7 +3,8 @@ import { LineChart, Line, XAxis, YAxis, Legend, CartesianGrid, Tooltip, Responsi
 import { useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from "./context/authContext";
 import Modal from "./components/Model.jsx"
-import { forecastAPI } from '../src/services/api.js';
+import VoiceAgent from "./components/VoiceAgent";
+import { forecastAPI, inventoryAPI } from '../src/services/api.js';
 import LoadingSpinner from '../src/components/loadingSpinner.jsx';
 import { trialAPI } from '../src/services/api.js';
 import { API_BASE_URL } from './config/apiBaseUrl';
@@ -979,6 +980,16 @@ const handleApplyDateFilters = async () => {
       filterStore
     );
 
+    let inventoryResponse = null;
+
+    try {
+      inventoryResponse = await inventoryAPI.getAlerts(filterStore);
+
+      console.log('✅ Inventory API response received:', inventoryResponse);
+    } catch (inventoryError) {
+      console.warn('⚠️ Inventory API unavailable:', inventoryError);
+    }
+
     console.log('✅ Backend response received:', {
       hasHistorical: !!response.historical,
       historicalCount: response.historical?.length,
@@ -1137,6 +1148,13 @@ const handleFileUpload = async (event) => {
   const file = event.target.files?.[0];
   
   if (!file) return;
+
+    try {
+      const fileText = await file.text();
+      setRawCsvData(fileText);
+    } catch (readError) {
+      console.warn('⚠️ Could not read uploaded file as text:', readError);
+    }
 
   // Validate file type
   const validTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
@@ -3174,6 +3192,8 @@ const metricWarning = data?.business_metrics?.metric_warning;
           </div>
         </div>
 
+              <VoiceAgent />
+        
         {/* Upload Status */}
         {uploadStatus &&  uploadStatus.message && (
           <div style={{
