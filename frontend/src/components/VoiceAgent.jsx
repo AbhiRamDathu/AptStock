@@ -33,7 +33,18 @@ export default function VoiceAgent() {
           JSON.stringify({
             type: "session.update",
             session: {
-              agent_id: "YOUR_AGENT_ID"
+              system_prompt:
+                "You are AptStock's voice assistant for supermarket inventory planning. " +
+                "Help supermarket owners understand sales, inventory, stock alerts, " +
+                "forecasting, and replenishment recommendations. " +
+                "Keep responses short, clear, practical, and conversational.",
+
+              greeting:
+                "Hi, I'm AptStock Assistant. How can I help you with your supermarket inventory today?",
+
+              output: {
+                voice: "anna"
+              }
             }
           })
         );
