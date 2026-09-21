@@ -14,6 +14,7 @@ export default function VoiceAgent() {
   const micSourceRef = useRef(null);
   const processorRef = useRef(null);
   const silentGainRef = useRef(null);
+  const pendingToolsRef = useRef([]);
 
   const playbackContextRef = useRef(null);
   const playbackNextTimeRef = useRef(0);
@@ -325,17 +326,39 @@ export default function VoiceAgent() {
             type: "session.update",
             session: {
               system_prompt:
-                "You are AptStock's voice assistant for supermarket inventory planning. " +
-                "Help supermarket owners understand sales, inventory, stock alerts, " +
-                "forecasting, and replenishment recommendations. " +
-                "Keep responses short, clear, practical, and conversational.",
+                 "You are AptStock's voice assistant for supermarket inventory planning. " +
+                  "You have access to a live inventory tool called get_inventory_alerts. " +
+                  "Whenever the user asks about inventory alerts, stock alerts, products needing attention, " +
+                  "or current inventory for a store, you MUST call get_inventory_alerts using the store name. " +
+                  "Never say that you cannot access uploaded files, databases, or inventory data. " +
+                  "If the store name is missing, ask the user for the store name. " +
+                  "After receiving the tool result, explain the result clearly and briefly. " +
+                  "Keep responses short, practical, and conversational.",
 
               greeting:
                 "Hi, I'm AptStock Assistant. How can I help you with your supermarket inventory today?",
 
               output: {
                 voice: "anna"
-              }
+              },
+              tools: [
+                {
+                  type: "function",
+                  name: "get_inventory_alerts",
+                  description:
+                    "Get current inventory alerts and products that may need attention for the selected store.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      store: {
+                        type: "string",
+                        description: "The supermarket store name"
+                      }
+                    },
+                    required: ["store"]
+                  }
+                }
+              ]
             }
           })
         );
@@ -350,6 +373,20 @@ export default function VoiceAgent() {
             "🤖 Voice event:",
             message.type
           );
+
+          if (message.type === "tool.call") {
+            console.log("🔧 Tool call:", message);
+
+            if (message.name === "get_inventory_alerts") {
+              pendingToolsRef.current.push({
+                call_id: message.call_id,
+                result: null,
+                arguments: message.arguments || {}
+              });
+            }
+
+            return;
+          }
 
           if (
             message.type ===
@@ -414,16 +451,91 @@ export default function VoiceAgent() {
             return;
           }
 
-          if (
-            message.type ===
-            "reply.done"
-          ) {
-            if (
-              message.status ===
-              "interrupted"
-            ) {
+          if (message.type === "tool.call") {
+            const store = message.arguments?.store;
+
+            fetch(
+              `${VOICE_SERVER_URL.replace("/api/voice", "")}/api/inventory-alerts?store=${encodeURIComponent(store)}`
+            )
+              .then((res) => res.json())
+              .then((result) => {
+                ws.send(
+                  JSON.stringify({
+                    type: "tool.result",
+                    call_id: message.call_id,
+                    result: JSON.stringify(result),
+                  })
+                );
+              })
+              .catch((error) => {
+                ws.send(
+                  JSON.stringify({
+                    type: "tool.result",
+                    call_id: message.call_id,
+                    result: JSON.stringify({
+                      error: error.message,
+                    }),
+                  })
+                );
+              });
+
+            return;
+          }
+
+          if (message.type === "reply.done") {
+            if (message.status === "interrupted") {
+              pendingToolsRef.current = [];
               flushPlayback();
+              return;
             }
+
+            for (const tool of pendingToolsRef.current) {
+              if (tool.result !== null) continue;
+
+              try {
+                const store = tool.arguments?.store;
+
+                if (!store) {
+                  tool.result = {
+                    error: "Store name is required"
+                  };
+                  continue;
+                }
+
+                const token = localStorage.getItem("token");
+
+                const response = await fetch(
+                  `${VOICE_SERVER_URL.replace("/api/voice", "")}/api/inventory-alerts?store=${encodeURIComponent(store)}`,
+                  {
+                    headers: {
+                      Authorization: `Bearer ${token}`
+                    }
+                  }
+                );
+
+                const result = await response.json();
+
+                tool.result = result;
+              } catch (error) {
+                console.error("❌ Inventory tool error:", error);
+
+                tool.result = {
+                  error: "Unable to retrieve inventory alerts"
+                };
+              }
+            }
+
+            for (const tool of pendingToolsRef.current) {
+              ws.send(
+                JSON.stringify({
+                  type: "tool.result",
+                  call_id: tool.call_id,
+                  result: JSON.stringify(tool.result)
+                })
+              );
+            }
+
+            pendingToolsRef.current = [];
 
             return;
           }
