@@ -3,10 +3,11 @@ import React, { useRef, useState } from "react";
 const VOICE_SERVER_URL = "https://aptstock.onrender.com/api/voice";
 const SAMPLE_RATE = 24000;
 
-export default function VoiceAgent() {
+export default function VoiceAgent({ dashboardData }) {
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [transcript, setTranscript] = useState("");
+  const [voiceState, setVoiceState] = useState("idle");
 
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -271,6 +272,7 @@ export default function VoiceAgent() {
       };
 
       setStatus("Listening...");
+      setVoiceState("listening");
       console.log("🎙️ Microphone streaming started");
     } catch (error) {
       console.error(
@@ -332,7 +334,7 @@ export default function VoiceAgent() {
                   "replenishment recommendations, and products needing attention. " +
                   "You have access to live inventory data through the get_inventory_alerts tool. " +
                   "When asked about current inventory or alerts, use the tool and explain the result. " +
-                  "If the store name is missing, ask for it. " +
+                  "Use the customer's current AptStock store context when available. Do not ask the customer to provide a store name if the application already has a store context. " +
                   "Keep every response short, practical, and conversational.",
 
               greeting:
@@ -346,13 +348,13 @@ export default function VoiceAgent() {
                   type: "function",
                   name: "get_inventory_alerts",
                   description:
-                    "Get current inventory alerts and products that may need attention for the selected store.",
+                    "Get a compact summary of current inventory alerts and products needing attention for the selected store.",
                   parameters: {
                     type: "object",
                     properties: {
                       store: {
                         type: "string",
-                        description: "The supermarket store name"
+                        description: "The retailer, store, branch, or location name"
                       }
                     },
                     required: ["store"]
@@ -378,66 +380,43 @@ export default function VoiceAgent() {
             console.log("🔧 Tool call:", message);
 
             if (message.name === "get_inventory_alerts") {
-              const store = message.arguments?.store;
+              const compactResult = {
+                store: dashboardData?.store || "Current Store",
 
-              if (!store) {
-                pendingToolsRef.current.push({
-                  call_id: message.call_id,
-                  result: {
-                    error: "Store name is required"
-                  }
-                });
+                status: "connected",
 
-                return;
-              }
+                inventory_count: Array.isArray(dashboardData?.inventory)
+                  ? dashboardData.inventory.length
+                  : 0,
 
-              const token = localStorage.getItem("token");
+                alert_count: Array.isArray(dashboardData?.priorityActions)
+                  ? dashboardData.priorityActions.length
+                  : 0,
 
-              console.log("🏪 Inventory tool store:", store);
-              console.log("🔐 Auth token available:", !!token);
+                top_alerts: Array.isArray(dashboardData?.priorityActions)
+                  ? dashboardData.priorityActions.slice(0, 5)
+                  : [],
 
-              fetch(
-                `${VOICE_SERVER_URL.replace("/api/voice", "")}/api/inventory-alerts?store=${encodeURIComponent(store)}`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`
-                  }
-                }
-              )
-                .then(async (res) => {
-                  const result = await res.json();
+                forecasts: Array.isArray(dashboardData?.forecasts)
+                  ? dashboardData.forecasts.slice(0, 5)
+                  : [],
 
-                  if (!res.ok) {
-                    throw new Error(
-                      result?.detail ||
-                      result?.message ||
-                      `Inventory API returned ${res.status}`
-                    );
-                  }
+                inventory: Array.isArray(dashboardData?.inventory)
+                  ? dashboardData.inventory.slice(0, 10)
+                  : []
+              };
 
-                  return result;
-                })
-                .then((result) => {
-                  console.log("✅ Inventory tool result:", result);
+              console.log(
+                "📦 Voice dashboard data:",
+                compactResult
+              );
 
-                  pendingToolsRef.current.push({
-                    call_id: message.call_id,
-                    result
-                  });
-                })
-                .catch((error) => {
-                  console.error(
-                    "❌ Inventory tool request failed:",
-                    error
-                  );
-
-                  pendingToolsRef.current.push({
-                    call_id: message.call_id,
-                    result: {
-                      error: error.message
-                    }
-                  });
-                });
+    // Queue the tool result.
+    // It will be sent after reply.done.
+              pendingToolsRef.current.push({
+                call_id: message.call_id,
+                result: compactResult
+              });
             }
 
             return;
@@ -490,7 +469,16 @@ export default function VoiceAgent() {
             setTranscript(
               `AptStock: ${message.text || ""}`
             );
+            setVoiceState("speaking");
 
+            return;
+          }
+
+          if (
+            message.type ===
+            "reply.started"
+          ) {
+            setVoiceState("thinking");
             return;
           }
 
@@ -498,6 +486,7 @@ export default function VoiceAgent() {
             message.type ===
             "reply.audio"
           ) {
+            setVoiceState("speaking");
             // AssemblyAI sends audio in `data`
             await playReplyAudio(
               message.data
@@ -506,35 +495,27 @@ export default function VoiceAgent() {
             return;
           }
 
-
           if (message.type === "reply.done") {
             if (message.status === "interrupted") {
               pendingToolsRef.current = [];
               flushPlayback();
-              return;
-            }
-
-            console.log(
-              "📦 Sending pending tool results:",
-              pendingToolsRef.current
-            );
-
-            for (const tool of pendingToolsRef.current) {
-              if (!tool.result) {
-                continue;
+            } else if (pendingToolsRef.current.length > 0) {
+              for (const tool of pendingToolsRef.current) {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(
+                    JSON.stringify({
+                      type: "tool.result",
+                      call_id: tool.call_id,
+                      result: JSON.stringify(tool.result)
+                    })
+                  );
+                }
               }
 
-              ws.send(
-                JSON.stringify({
-                  type: "tool.result",
-                  call_id: tool.call_id,
-                  result: JSON.stringify(tool.result)
-                })
-              );
+              pendingToolsRef.current = [];
             }
 
-            pendingToolsRef.current = [];
-
+            setVoiceState("listening");
             return;
           }
 
@@ -565,6 +546,7 @@ export default function VoiceAgent() {
             console.log(
               "🎤 Speech detected"
             );
+            setVoiceState("listening");
 
             return;
           }
@@ -576,6 +558,7 @@ export default function VoiceAgent() {
             console.log(
               "🎤 Speech ended"
             );
+            setVoiceState("thinking");
 
             return;
           }
@@ -647,60 +630,251 @@ export default function VoiceAgent() {
     setStatus("Ready");
   };
 
-  return (
+    return (
+       <>
+    <style>{`
+      @keyframes aptstockPulse {
+        0%, 100% {
+          box-shadow: 0 0 0 10px rgba(96,165,250,0.10),
+                      0 0 35px rgba(96,165,250,0.35);
+        }
+        50% {
+          box-shadow: 0 0 0 18px rgba(96,165,250,0.04),
+                      0 0 75px rgba(96,165,250,0.65);
+        }
+      }
+    `}
+    </style>
     <div
       style={{
-        padding: "20px",
-        borderRadius: "16px",
-        background: "#111827",
-        color: "white",
-        margin: "20px 0"
+        margin: "24px 0",
+        padding: "28px",
+        borderRadius: "24px",
+        background:
+          "linear-gradient(135deg, #0f172a 0%, #111827 55%, #172554 100%)",
+        color: "#ffffff",
+        boxShadow: "0 18px 50px rgba(15, 23, 42, 0.18)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        overflow: "hidden",
+        position: "relative"
       }}
     >
-      <h3>
-        🎙️ AptStock Voice Assistant
-      </h3>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "16px",
+          marginBottom: "24px"
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: "700",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#93c5fd",
+              marginBottom: "6px"
+            }}
+          >
+            AptStock Intelligence
+          </div>
 
-      <p>{status}</p>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: "24px",
+              fontWeight: "700"
+            }}
+          >
+            Voice Assistant
+          </h3>
+
+          <p
+            style={{
+              margin: "6px 0 0",
+              color: "#94a3b8",
+              fontSize: "14px"
+            }}
+          >
+            Ask about stock risks, alerts, forecasts and replenishment.
+          </p>
+        </div>
+
+        <div
+          style={{
+            padding: "7px 12px",
+            borderRadius: "999px",
+            background: connected
+              ? "rgba(34,197,94,0.14)"
+              : "rgba(148,163,184,0.12)",
+            color: connected ? "#86efac" : "#cbd5e1",
+            fontSize: "12px",
+            fontWeight: "700",
+            whiteSpace: "nowrap"
+          }}
+        >
+          {connected ? "● LIVE" : "● READY"}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          padding: "10px 0 24px"
+        }}
+      >
+        <div
+          style={{
+            width: "116px",
+            height: "116px",
+            transform:
+              voiceState === "listening"
+                ? "scale(1.12)"
+                : voiceState === "thinking"
+                ? "scale(1.05)"
+                : voiceState === "speaking"
+                ? "scale(1.08)"
+                : "scale(1)",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background:
+              "radial-gradient(circle at 35% 30%, #60a5fa, #4f46e5 48%, #312e81 100%)",
+            boxShadow:
+              voiceState === "listening"
+                ? "0 0 0 16px rgba(96,165,250,0.12), 0 0 70px rgba(96,165,250,0.55)"
+                : voiceState === "thinking"
+                ? "0 0 0 10px rgba(129,140,248,0.10), 0 0 55px rgba(129,140,248,0.45)"
+                : voiceState === "speaking"
+                ? "0 0 0 14px rgba(34,197,94,0.10), 0 0 65px rgba(34,197,94,0.40)"
+                : "0 12px 35px rgba(0,0,0,0.25)",
+            transition: "all 0.3s ease",
+            animation:
+              voiceState === "listening"
+                ? "aptstockPulse 1.8s ease-in-out infinite"
+                : "none",
+                      }}
+        >
+          <span
+            style={{
+              fontSize: "42px"
+            }}
+          >
+            🎙️
+          </span>
+        </div>
+
+        <div
+          style={{
+            marginTop: "18px",
+            fontSize: "16px",
+            fontWeight: "600"
+          }}
+        >
+          {status}
+        </div>
+
+        <div
+          style={{
+            marginTop: "5px",
+            color: "#94a3b8",
+            fontSize: "13px"
+          }}
+        >
+          {connected
+            ? "Speak naturally — I'm listening."
+            : "Start a conversation with AptStock."}
+        </div>
+      </div>
 
       {transcript && (
         <div
           style={{
-            padding: "12px",
-            marginBottom: "12px",
-            background: "#1f2937",
-            borderRadius: "10px"
+            marginBottom: "20px",
+            padding: "16px 18px",
+            borderRadius: "16px",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.08)"
           }}
         >
-          {transcript}
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: "700",
+              color: "#93c5fd",
+              textTransform: "uppercase",
+              letterSpacing: "0.07em",
+              marginBottom: "7px"
+            }}
+          >
+            Live conversation
+          </div>
+
+          <div
+            style={{
+              color: "#e2e8f0",
+              fontSize: "15px",
+              lineHeight: 1.6
+            }}
+          >
+            {transcript}
+          </div>
         </div>
       )}
 
-      {!connected ? (
-        <button
-          onClick={startVoiceAgent}
-          style={{
-            padding: "12px 20px",
-            borderRadius: "10px",
-            border: "none",
-            cursor: "pointer"
-          }}
-        >
-          🎙️ Talk to AptStock
-        </button>
-      ) : (
-        <button
-          onClick={stopVoiceAgent}
-          style={{
-            padding: "12px 20px",
-            borderRadius: "10px",
-            border: "none",
-            cursor: "pointer"
-          }}
-        >
-          🛑 Stop
-        </button>
-      )}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center"
+        }}
+      >
+        {!connected ? (
+          <button
+            onClick={startVoiceAgent}
+            style={{
+              width: "100%",
+              maxWidth: "340px",
+              padding: "15px 22px",
+              borderRadius: "14px",
+              border: "none",
+              background:
+                "linear-gradient(135deg, #6366f1, #4f46e5)",
+              color: "#ffffff",
+              fontSize: "15px",
+              fontWeight: "700",
+              cursor: "pointer",
+              boxShadow: "0 10px 25px rgba(79,70,229,0.3)"
+            }}
+          >
+            🎙️ Start Voice Assistant
+          </button>
+        ) : (
+          <button
+            onClick={stopVoiceAgent}
+            style={{
+              width: "100%",
+              maxWidth: "340px",
+              padding: "15px 22px",
+              borderRadius: "14px",
+              border: "1px solid rgba(248,113,113,0.35)",
+              background: "rgba(239,68,68,0.12)",
+              color: "#fca5a5",
+              fontSize: "15px",
+              fontWeight: "700",
+              cursor: "pointer"
+            }}
+          >
+            ⏹ Stop Conversation
+          </button>
+        )}
+      </div>
     </div>
+    </>
   );
 }

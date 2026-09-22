@@ -1340,36 +1340,26 @@ console.log('✅ Mapped Data Result:', {
       // Update date filters if provided
      if (response.summary && response.summary.date_range) {
 
-  const fileEndDate = response.summary.date_range.end;
+    const fileStartDate = response.summary.date_range.start;
+    const fileEndDate = response.summary.date_range.end;
 
-  // Convert last historical date
-  const lastDate = new Date(fileEndDate);
+    const formatDate = (date) => date.toISOString().split("T")[0];
 
-  // Forecast start = next day
-  const forecastStart = new Date(lastDate);
-  forecastStart.setDate(lastDate.getDate() + 1);
+    setFilterFromDate(formatDate(new Date(fileStartDate)));
+    setFilterToDate(formatDate(new Date(fileEndDate)));
 
-  // Forecast end = next 15 days
-  const forecastEnd = new Date(lastDate);
-  forecastEnd.setDate(lastDate.getDate() + 15);
-
-  const formatDate = (date) => date.toISOString().split("T")[0];
-
-  setFilterFromDate(formatDate(forecastStart));
-  setFilterToDate(formatDate(forecastEnd));
-
-  console.log("✅ Forecast date range set:", {
-    from: formatDate(forecastStart),
-    to: formatDate(forecastEnd)
-  });
+    console.log("✅ Historical date range set:", {
+      from: formatDate(new Date(fileStartDate)),
+      to: formatDate(new Date(fileEndDate))
+    });
 }else if (response.historical && response.historical.length > 0) {
     // Fallback: Extract from historical data
     const dates = response.historical.map(h => new Date(h.date));
     const minDate = new Date(Math.min(...dates));
     const maxDate = new Date(Math.max(...dates));
     
-    setFilterFromDate(minDate.toISOString().split('T'));
-    setFilterToDate(maxDate.toISOString().split('T'));
+    setFilterFromDate(minDate.toISOString().split('T')[0]);
+    setFilterToDate(maxDate.toISOString().split('T')[0]);
   }
       
       // Success message
@@ -3192,7 +3182,7 @@ const metricWarning = data?.business_metrics?.metric_warning;
           </div>
         </div>
 
-              <VoiceAgent />
+              <VoiceAgent dashboardData={data} />
         
         {/* Upload Status */}
         {uploadStatus &&  uploadStatus.message && (
@@ -4914,7 +4904,7 @@ Keep tracking daily during trial to compare recommendation vs actual sales.
         }}>
           <span>🤖</span>
           <span>
-            Upcoming Demand View ({filterFromDate} to {filterToDate})
+            Upcoming Demand View (15-Day Forecast)
           </span>
         </h3>
         <div style={{ 
@@ -5164,7 +5154,11 @@ Keep tracking daily during trial to compare recommendation vs actual sales.
               🔥 {(forecast.forecast || []).length} Projection points covering FULL range | 
               Total Predicted: {totalPredicted.toLocaleString()} units | 
                
-              📅 Complete coverage {filterFromDate} to {filterToDate} | 
+              📅 Forecast horizon: {
+                forecast.forecast?.length
+                  ? `${forecast.forecast[0].date} to ${forecast.forecast[forecast.forecast.length - 1].date}`
+                  : 'No forecast dates available'
+              } |
               🚫 No more limited Projections!
             </div>
 
