@@ -6,6 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from datetime import datetime
 import logging
+import os
 from typing import Optional, Dict
 from app.services.database_service import DatabaseService, db
 
@@ -15,7 +16,7 @@ from app.config import JWT_SECRET, JWT_ALGORITHM
 logger = logging.getLogger(__name__)
 
 # ✅ Security scheme for API endpoints
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 class TrialManager:
     """
@@ -124,85 +125,78 @@ class TrialManager:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
-    """
-    ✅ Verify JWT token from Bearer header
-    
-    Usage in routes:
-    @router.post("/upload-and-process")
-    async def upload_file(
-        file: UploadFile = File(...),
-        token: dict = Depends(verify_token)  # ← Add this parameter
-    ):
-        user_email = token.get('email', 'unknown')
-        ...
-    
-    Expected header:
-        Authorization: Bearer <jwt_token>
-    
-    Returns:
-        dict: Token payload containing user info (sub, email, etc.)
-    
-    Raises:
-        HTTPException: 401 if token invalid/expired
-    """
+    # HACKATHON DEMO MODE
+    if os.getenv("DEMO_MODE", "false").lower() == "true":
+        logger.info("HACKATHON DEMO MODE")
+        return {
+            "user_id": "aptstock-demo",
+            "email": "demo@aptstock.ai",
+            "token_type": "access",
+            "sub": "aptstock-demo",
+            "role": "demo",
+            "demo_mode": True,
+        }
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         token = credentials.credentials
-        logger.info(f"🔐 Verifying token: {token[:20]}...")
-        
-        # Decode JWT
+        logger.info(f"Verifying token: {token[:20]}...")
+
         payload = jwt.decode(
             token,
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM]
         )
-        
-        # Extract user info
+
         user_id: str = payload.get("sub")
         email: str = payload.get("email")
         token_type: str = payload.get("type")
-        
+
         if not user_id or not email:
-            logger.warning("⚠️  Token missing required fields (sub, email)")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token: missing required fields",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         if token_type != "access":
-            logger.warning(f"⚠️  Wrong token type: {token_type} (expected: access)")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type. Use access token, not refresh token.",
+                detail="Invalid token type",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        logger.info(f"✅ Token verified for user: {email}")
-        
-        # Return token payload (contains user info)
+
         return {
             "user_id": user_id,
             "email": email,
             "token_type": token_type,
-            "sub": user_id,  # Keep original field name for compatibility
-            **payload  # Include all other fields
+            "sub": user_id,
+            **payload
         }
-        
+
     except JWTError as e:
-        logger.error(f"❌ JWT decode error: {str(e)}")
+        logger.error(f"JWT decode error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except Exception as e:
-        logger.error(f"❌ Token verification error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token verification failed",
+            detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Token verification error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token verification failed",
+        )
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2️⃣ OPTIONAL: Verify Token without raising exceptions (returns None if invalid)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -443,6 +437,10 @@ def check_trial_status_async(func):
     async def wrapper(*args, **kwargs):
         # Extract token from kwargs
         token = kwargs.get('token')
+                # HACKATHON DEMO MODE
+        if token and token.get("demo_mode") is True:
+            logger.info("🎬 DEMO MODE: trial check bypassed")
+            return await func(*args, **kwargs)
         
         if not token:
             logger.error("❌ No token provided to check_trial_status_async")
@@ -481,4 +479,3 @@ def check_trial_status_async(func):
             )
     
     return wrapper
- 
