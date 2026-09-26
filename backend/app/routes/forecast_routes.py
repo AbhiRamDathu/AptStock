@@ -663,6 +663,12 @@ async def upload_and_process_file(
     try:
         user_email = token.get('email', 'unknown')
         user_doc = db.users.find_one({"email": user_email})
+        if user_doc is None:
+            user_doc = {
+                "email": user_email,
+                "role": "user",
+                "plan": "pro"
+            }
         user_role = user_doc.get("role", "user").lower()
         user_plan = user_doc.get("plan", "starter")
 
